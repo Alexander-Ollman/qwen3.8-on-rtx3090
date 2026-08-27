@@ -1,0 +1,5 @@
+_build/
+_render/
+_frag.html
+shot-*.png
+*.tmp

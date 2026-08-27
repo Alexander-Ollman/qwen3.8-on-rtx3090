@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Method · Qwen3.8-27B on RTX 3090</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="topbar"><div class="topbar-in">
+  <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
+  <div class="tabs">
+    <a href="index.html">Story</a>
+    <a href="results.html">Results</a>
+    <a href="method.html" aria-current="page">Method</a>
+    <a href="setup.html">Setup</a>
+    <a href="log.html">Log</a>
+  </div>
+</div></nav>
+<main class="wrap">
+<header class="hero">
+  <p class="kicker">Method &middot; and how to measure your own</p>
+  <h1>The conditions are part of the number</h1>
+  <p class="standfirst">Six different ways a measurement on this machine came out silently wrong &mdash; none of which raised an error &mdash; and the instrument built afterwards to stop it happening again.</p>
+</header>
+
+<p class="lede">Every finding on this site came from a machine where a benchmark can be wrong in at least six ways without anything failing. No exception was thrown, no HTTP error returned, no log line printed. In each case the number looked entirely reasonable. That is the hazard: a broken measurement does not announce itself, it just quietly reads a bit high or a bit low, and you publish it.</p>
+
+<h2>Six ways to measure the wrong thing</h2>
+<p>Each of these cost real time here. They are ordered by how much damage they did.</p>
+
+<div class="box warn">
+  <strong>1. Reasoning enabled by default.</strong> Hit <strong>five separate times across four different harnesses</strong>. Recent models emit reasoning tokens unless told otherwise, inflating token counts severalfold. The severe form: if the server runs a reasoning parser, that content is extracted into a <em>separate response field</em>, so a client expecting inline tags receives <strong>completely empty content with HTTP&nbsp;200 and a full token count</strong>. One 225-case benchmark ran to completion scoring a model whose output it could not read. Client-side flags such as <code>--thinking off</code> are frequently silent no-ops. What works is sending <code>chat_template_kwargs: {"enable_thinking": false}</code> and then asserting the content is non-empty.
+</div>
+
+<div class="box warn">
+  <strong>2. Your second GPU is not isolated.</strong> Running two benchmarks on two cards looks like free parallelism. The cards share PCIe, host memory bandwidth and CPU, and batch-1 decode is launch-latency sensitive. The same task measured <strong>95.8&nbsp;tok/s idle and 58.0&nbsp;tok/s with the other card busy &mdash; a 39% error</strong>. It invalidated a full day of context-scaling results, and the correction is recorded in section&nbsp;11 of the log rather than quietly patched.
+</div>
+
+<div class="box warn">
+  <strong>3. Comparing across prompt lengths.</strong> Subtle, and it produced a <em>wrong correction to a correct table</em>. We &ldquo;found&rdquo; a 20% contention error that did not exist, by comparing a 46-token prompt against 1.1K-context runs. Speculative acceptance rises with context (0.42&nbsp;&rarr;&nbsp;0.66 for one drafter), so speed rises with it. The control settles it: with speculation <em>off</em>, prompt length changes decode speed by <strong>0.6%</strong> &mdash; that is, not at all. Any speed comparison across prompt lengths is meaningless unless acceptance is reported too.
+</div>
+
+<div class="box warn">
+  <strong>4. Reverse proxies truncate long prompts.</strong> nginx defaults <code>client_max_body_size</code> to 1&nbsp;MB and returns 413 before the request reaches the server. A 64K-token prompt exceeds that. The failures present as model errors.
+</div>
+
+<div class="box warn">
+  <strong>5. Generated code hangs the harness.</strong> One benchmark case stalled 68 minutes on a <code>node</code> process spinning at 99.9% CPU &mdash; model-written JavaScript with an infinite loop. Aider's benchmark has no per-test wall-clock kill. Anything running generated code unattended needs its own timeout.
+</div>
+
+<div class="box warn">
+  <strong>6. Server-restart drift.</strong> Repeated measurements against one running server agree closely. Restart it and the whole set shifts &mdash; the same card and configuration gave 165.4, then 159.6&nbsp;tok/s. Measurements taken either side of a restart are not the same experiment.
+</div>
+
+<h2>Know your noise floor &mdash; it is three different numbers</h2>
+<p>&ldquo;Noise&rdquo; here is not one quantity, and conflating the three leads to both false positives and false confidence.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Source of variation</th><th>Magnitude</th><th>What it means for you</th></tr></thead>
+    <tbody>
+      <tr><td>Repeats against one live server</td><td class="n">0.1&ndash;2%</td><td>Five repeats give tight error bars; more adds little</td></tr>
+      <tr><td>Across a server restart</td><td class="n">~4%</td><td>Re-measure both arms after any restart, or the comparison is void</td></tr>
+      <tr><td>Between two identical GPUs</td><td class="n">4&ndash;6%</td><td>Never compare a result on card 0 against one on card 1</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="box">
+  <strong>Treat single-stream differences under about 5% as noise</strong> &mdash; including ours. Correctness is noisier still: two runs of the same 225-case suite at temperature&nbsp;0, nominally deterministic, differed by <strong>2 points in aggregate and 13 points on one language</strong>. Batch composition varies under concurrency, which changes reduction order and flips near-tie tokens. Aggregate scores resolve to roughly &plusmn;2 points; per-language scores only to about &plusmn;10.
+</div>
+
+<h2>The instrument</h2>
+<p>These lessons were consolidated into a benchmark framework, so that testing the next model is a config file rather than a re-derivation of method. Six axes, three tiers, one YAML per model.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Axis</th><th>What it measures</th><th>Tier</th><th>Time</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Speed</strong></td><td>Mean and peak decode tok/s across 11 task cells, plus draft acceptance, tokens per verify step, and per-draft-position acceptance</td><td><span class="badge">core</span></td><td class="n">~25 min</td></tr>
+      <tr><td><strong>Throughput</strong></td><td>Aggregate and per-request tok/s at C = 1, 4, 16, 32, 64</td><td><span class="badge">core</span></td><td class="n">~20 min</td></tr>
+      <tr><td><strong>Context</strong></td><td>Maximum prompt actually served; decode and TTFT slopes with correlation</td><td><span class="badge">core</span></td><td class="n">~1 h</td></tr>
+      <tr><td><strong>Correctness</strong></td><td>Aider polyglot: pass rates before and after test feedback, well-formed edit rate, per language</td><td><span class="badge">core</span></td><td class="n">~2 h</td></tr>
+      <tr><td><strong>Agentic</strong></td><td>Acceptance and decode rate against <em>accumulated</em> context across a real multi-turn build</td><td><span class="badge warn">full</span></td><td class="n">~2 h</td></tr>
+      <tr><td><strong>Efficiency</strong></td><td>Tokens per watt, peak VRAM, sampled during the other axes</td><td><span class="badge">core</span></td><td class="n">free</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p>Acceptance sits on the speed axis deliberately: it is the <em>causal</em> variable behind most of the tok/s spread. The gap between 144 tok/s on coding and 105 on prose was an acceptance difference, not a hardware one. And correctness is the one axis a speculator change cannot move &mdash; speculative decoding is mathematically exact &mdash; which makes an unchanged score across speculators a useful self-test of the harness.</p>
+
+<h2>The fairness contract</h2>
+<p>Eleven conditions are hashed into a fingerprint attached to every result. The comparison tool refuses to place two cards side by side when their fingerprints differ, naming every field that diverged.</p>
+
+<pre><code>conditions.power_cap_w        250
+conditions.single_tenant      true
+conditions.thinking_disabled  true
+conditions.prefix_caching     0
+conditions.temperature        0
+conditions.max_tokens         256
+conditions.corpus_sha         eb13204dad3d3188
+conditions.edit_format        diff
+conditions.concurrency_levels [1, 4, 16, 32, 64]
+conditions.endpoint_mode      pinned-replica
+harness.framework             1.0.0
+                              -> fingerprint cdf5261ea5eaca65</code></pre>
+
+<div class="box stop">
+  <strong>Why this is enforced in code rather than documented.</strong> When a run was deliberately mis-conditioned as a test, it reported <strong>171 tok/s against the correct 144</strong>. Bad conditions look <em>better</em>. Nobody remembers three days later which flags a number came from, and the incorrect number is the more attractive one to keep.
+</div>
+
+<p>The gate itself needed testing. An early version printed &ldquo;untrustworthy cards&rdquo;, then printed &ldquo;comparable &mdash; identical fingerprint&rdquo;, then exited zero &mdash; because the fingerprint covers <em>conditions</em>, not <em>validity</em>. A card measured against an endpoint returning empty content passed the strict gate cleanly. Testing a defence against the actual failure it defends against is not optional.</p>
+
+<h3>Silent failures, encoded as preflight checks</h3>
+<p>The six hazards above are executable checks rather than prose. <code>preflight.sh</code> <strong>fails</strong> on: reasoning detected active (probing for empty content or a stray reasoning field), <code>client_max_body_size</code> unset, a power cap above expectation, or missing measurement scripts. It <strong>warns</strong> on <code>least_conn</code> load balancing, which biases traffic toward the faster replica, and on foreign processes holding a GPU. A blocked run cannot produce a card unless forced, and a forced card is stamped untrustworthy.</p>
+
+<h2>Why none of this is comparable to a leaderboard</h2>
+<p>The figures on this site measure <em>one deployment</em>, not a model's capability. Four things differ from any published number, each moving results independently:</p>
+<ul>
+  <li><strong>Quantization</strong> &mdash; a 4-bit checkpoint with a further-quantized <code>lm_head</code>, not the released weights</li>
+  <li><strong>Harness version</strong> &mdash; a specific commit, whose prompts and scoring differ from other commits</li>
+  <li><strong>Reasoning disabled</strong> &mdash; deliberately, for comparability with our own earlier runs</li>
+  <li><strong>Serving stack</strong> &mdash; a community fork with performance patches upstream does not have</li>
+</ul>
+
+<div class="box">
+  <strong>If a genuinely comparable number is ever wanted</strong>, the recipe is: the unquantized checkpoint, the reference harness at its exact commit, that harness's own default sampling parameters, speculation off, and the result reported separately as a reproduction attempt rather than mixed into this table. We did not do this, because the question here was how <em>this deployment</em> behaves &mdash; which is the question that determines what to actually run.
+</div>
+
+<h2>Provenance</h2>
+<p>Conditions changed across five days as we learned what mattered. Two tables in the log can look directly comparable without being so; this is the key.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Condition</th><th>Changed when</th><th>Effect</th><th>Affects</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Cross-GPU contention</strong></td><td>Campaigns run in parallel on both cards</td><td class="n">up to &minus;39%</td><td>&sect;11 (corrected), &sect;17 long-context rows, ~6% of &sect;10</td></tr>
+      <tr><td><strong>250 W power cap</strong></td><td>Applied after the Xid&nbsp;79 fault</td><td class="n">~&minus;14%</td><td>Pre-cap: &sect;10 depth sweep. &sect;&sect;12&ndash;20 all post-cap</td></tr>
+      <tr><td><strong>Reasoning enabled</strong></td><td>On by default until found in &sect;15</td><td class="n">~5&times; tokens</td><td>Every token count before &sect;15</td></tr>
+      <tr><td><strong>Prompt corpus</strong></td><td>Random filler &rarr; real prose, mid-&sect;11</td><td class="n">large</td><td>Acceptance; never compare across the change</td></tr>
+      <tr><td><strong>Prompt length</strong></td><td>Varies by campaign (46 tok &rarr; 192K)</td><td class="n">0.42&rarr;0.66 accept</td><td>The error that produced a wrong correction</td></tr>
+      <tr><td><strong>Pinned vs balanced</strong></td><td>Per campaign</td><td class="n">~4&ndash;6%</td><td>&sect;&sect;13&ndash;14, 17 pinned; &sect;&sect;15, 18 balanced</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="box">
+  <strong>Which sections are clean.</strong> Sections 12, 13, 14, 15, 16, 18 and 20 are provably single-tenant. Section&nbsp;11 is contended and carries a correction banner. Section&nbsp;17's beyond-64K table inherits contended rows and is annotated per row. Section&nbsp;10 is marginal &mdash; about 6% on one line, inside the noise floor, and needed <em>no</em> correction despite an earlier claim that it did.
+</div>
+
+<div class="foot">
+  <p>The framework, its specification and the fairness contract live alongside the deployment configs. See <a href="setup.html">Setup</a> to reproduce the stack, <a href="results.html">Results</a> for the measurements, and the <a href="log.html">Log</a> for the primary record including every correction.</p>
+</div>
+
+</main>
+</body>
+</html>

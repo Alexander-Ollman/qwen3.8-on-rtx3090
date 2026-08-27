@@ -1,0 +1,2153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Measurement log · Qwen3.8-27B on RTX 3090</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="topbar"><div class="topbar-in">
+  <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
+  <div class="tabs">
+    <a href="index.html">Story</a>
+    <a href="results.html">Results</a>
+    <a href="method.html">Method</a>
+    <a href="setup.html">Setup</a>
+    <a href="log.html" aria-current="page">Log</a>
+  </div>
+</div></nav>
+<main class="wrap">
+<header class="hero">
+  <p class="kicker">Primary source &middot; 20 sections</p>
+  <h1>The measurement log</h1>
+  <p class="standfirst">The complete record, in the order it happened &mdash; including the runs that were wrong, the corrections, and the one comparison that could not be made at all. Sections&nbsp;1&ndash;9 are prior research; 10&ndash;20 are measurements from this machine.</p>
+</header>
+<div class="box warn"><strong>Read section&nbsp;19 first if you plan to cite anything.</strong> Conditions changed across the five days &mdash; power cap, reasoning setting, prompt corpus, single-tenancy &mdash; and two tables in this document can look comparable without being so. Section&nbsp;19 is the provenance key; section&nbsp;20 holds the canonical numbers, and wins wherever an earlier section disagrees.</div>
+<nav class="toc-inline" aria-label="Sections"><p class="toc-title">The 20 sections</p><ol><li><a href="#quants">Weight Quantizations</a></li><li><a href="#gguf">GGUF Variants (llama.cpp / Ollama)</a></li><li><a href="#kv">KV Cache Quantization</a></li><li><a href="#mtp">MTP Speculative Decoding</a></li><li><a href="#frameworks">Serving Frameworks</a></li><li><a href="#strategies">Dual-3090 Deployment Strategies</a></li><li><a href="#perf">Published Performance Numbers</a></li><li><a href="#accuracy">Accuracy Deep-Dive</a></li><li><a href="#configs">Recommended Benchmark Configurations</a></li><li><a href="#measured">Measured Results</a></li><li><a href="#ctxscaling">Speed vs Context Length</a></li><li><a href="#coding">Coding Workloads, Measured Clean</a></li><li><a href="#agentic">Multi-Turn Agentic Profile</a></li><li><a href="#crosscheck">Independent Cross-Check</a></li><li><a href="#correctness">Correctness &mdash; Aider Polyglot</a></li><li><a href="#quantblock">A Comparison That Could Not Be Run</a></li><li><a href="#servinglayer">Choosing a Serving Layer for Comparison</a></li><li><a href="#reportcard">The Framework&rsquo;s First Report Card</a></li><li><a href="#provenance">Reading These Numbers</a></li><li><a href="#canonical">Canonical Numbers</a></li></ol></nav><!-- 1. Weight Quantizations -->
+  <section class="section" id="quants">
+    <h2>1. Weight Quantizations</h2>
+    <p class="section-note">All formats available on HuggingFace for Qwen3.8-27B, ranked by accuracy. VRAM is weights-only; add 2&ndash;8 GB for KV cache depending on context length and cache dtype.</p>
+
+    <div class="legend">
+      <span class="legend-item"><span class="badge">LOSSLESS</span> &gt;99%</span>
+      <span class="legend-item"><span class="badge">MINIMAL</span> 97&ndash;99%</span>
+      <span class="legend-item"><span class="badge warn">MODERATE</span> 94&ndash;97%</span>
+      <span class="legend-item"><span class="badge stop">LOSS</span> &lt;94%</span>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Format</th>
+            <th>Weights</th>
+            <th>Fits 1 GPU?</th>
+            <th>Accuracy</th>
+            <th>Quality</th>
+            <th>Best Framework</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>BF16</strong> (baseline)<span class="sub">Qwen/Qwen3.8-27B</span></td>
+            <td class="mono">BF16</td>
+            <td class="n">55.6 GB</td>
+            <td>No (TP=2)</td>
+            <td>100% baseline</td>
+            <td><span class="badge">BASELINE</span></td>
+            <td>vLLM, SGLang</td>
+          </tr>
+          <tr>
+            <td><strong>FP8</strong> (official)<span class="sub">Qwen/Qwen3.8-27B-FP8</span></td>
+            <td class="mono">FP8 E4M3</td>
+            <td class="n">28.0 GB</td>
+            <td>No (TP=2)</td>
+            <td>~99.9%</td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (storage only on Ampere&mdash;no compute speedup)</td>
+          </tr>
+          <tr>
+            <td><strong>W8A16 INT8 + MTP</strong><span class="sub">lued/Qwen3.8-27B-INT8-W8A16-MTP</span></td>
+            <td class="mono">INT8 sym RTN</td>
+            <td class="n">31.6 GB</td>
+            <td>No (TP=2)</td>
+            <td>99.36% top-1<span class="sub">KLD 0.000894 nats/tok</span></td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (compressed-tensors, BF16 MTP drafter incl.)</td>
+          </tr>
+          <tr>
+            <td><strong>AutoRound W4A16</strong><span class="sub">dbirks/Qwen3.8-27B-W4A16-AutoRound</span></td>
+            <td class="mono">INT4 g128</td>
+            <td class="n">19.5 GB</td>
+            <td><strong>Yes</strong></td>
+            <td>99.4% avg recovery<span class="sub">GSM8K 91.7% vs 91.1% BF16</span></td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (Marlin kernel)</td>
+          </tr>
+          <tr>
+            <td><strong>MixedInt4 AutoRound</strong><span class="sub">Pilcothink/Qwen3.8-27B-MixedInt4-AutoRound</span></td>
+            <td class="mono">INT4 g32 mixed</td>
+            <td class="n">~19.5 GB</td>
+            <td><strong>Yes</strong></td>
+            <td>99.4% avg<span class="sub">Vision layers kept at original precision</span></td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (Marlin)</td>
+          </tr>
+          <tr>
+            <td><strong>AWQ INT4</strong><span class="sub">cyankiwi/Qwen3.8-27B-AWQ-INT4</span></td>
+            <td class="mono">AWQ INT4</td>
+            <td class="n">~19.5 GB</td>
+            <td><strong>Yes</strong></td>
+            <td>~99%<span class="sub">STEM+Agentic calibration set</span></td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (awq_marlin), SGLang</td>
+          </tr>
+          <tr>
+            <td><strong>AutoRound GPTQ</strong><span class="sub">Vishva007/Qwen3.8-27B-W4A16-AutoRound-GPTQ</span></td>
+            <td class="mono">GPTQ INT4</td>
+            <td class="n">~17 GB</td>
+            <td><strong>Yes</strong></td>
+            <td>~99% (est.)</td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM (gptq_marlin)</td>
+          </tr>
+          <tr>
+            <td><strong>EXL3 3.0 bpw</strong><span class="sub">ykarout/Qwen3.5-27B-exl3-3.0bpw</span></td>
+            <td class="mono">EXL3 trellis</td>
+            <td class="n">~12 GB</td>
+            <td><strong>Yes</strong></td>
+            <td>Best ppl/bit (no bench yet)</td>
+            <td><span class="badge">TBD</span></td>
+            <td>ExLlamaV3 + TabbyAPI only</td>
+          </tr>
+          <tr>
+            <td><strong>NVFP4</strong><span class="sub">unsloth/Qwen3.8-27B-NVFP4</span></td>
+            <td class="mono">MXFP4</td>
+            <td class="n">~10.6 GB</td>
+            <td>N/A</td>
+            <td>92&ndash;97%</td>
+            <td><span class="badge stop">BLOCKED</span></td>
+            <td>Blackwell GPUs only&mdash;cannot run on RTX 3090</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Key finding:</strong> AutoRound W4A16 achieves near-lossless quality at 19.5 GB&mdash;fitting a single RTX 3090 with room for KV cache. This enables the 2-replica load-balanced pattern that proved fastest for Qwen3.6-27B. AWQ is comparably good but has less published accuracy data for Qwen3.8 specifically.
+    </div>
+  </section>
+
+  <!-- 2. GGUF Variants -->
+  <section class="section" id="gguf">
+    <h2>2. GGUF Variants (llama.cpp / Ollama)</h2>
+    <p class="section-note">Quality measured by KL divergence and top-1 token agreement against BF16 reference. Lower KLD is better; higher agreement is better. Highlighted row fits a single 3090 with good KV cache headroom. Unsloth &ldquo;UD&rdquo; prefix = Dynamic v3.0 quantization (per-layer quant type selection + 1.5M-token imatrix calibration); independently validated to have ~2&times; lower KLD than standard Q4_K_M at similar size. UD-Q4_K_XL and above include MTP heads in the GGUF; below Q2_K_XL, MTP is stripped (separate 1.37 GB MTP Q4_0 file available). Unsloth&rsquo;s only RTX 3090-usable format is GGUF&mdash;their NVFP4 is Blackwell-only, and they don&rsquo;t produce AWQ/GPTQ/AutoRound checkpoints.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Quant</th>
+            <th>Size</th>
+            <th>Top-1 Agree</th>
+            <th>KL Divergence</th>
+            <th>Quality</th>
+            <th>Publisher</th>
+            <th>Fits 24 GB?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">Q8_0</td>
+            <td class="n">28.89 GB</td>
+            <td class="n">98.93%</td>
+            <td class="n">0.00064</td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>AtomicChat</td>
+            <td>No (TP=2)</td>
+          </tr>
+          <tr>
+            <td class="mono">Q6_K</td>
+            <td class="n">22.43 GB</td>
+            <td class="n">97.93%</td>
+            <td class="n">0.00242</td>
+            <td><span class="badge">97&ndash;99%</span></td>
+            <td>LM Studio</td>
+            <td>Tight</td>
+          </tr>
+          <tr>
+            <td class="mono">UD-Q5_K_XL</td>
+            <td class="n">20.22 GB</td>
+            <td class="n">97.28%</td>
+            <td class="n">0.00437</td>
+            <td><span class="badge">97&ndash;99%</span></td>
+            <td>Unsloth</td>
+            <td>Yes</td>
+          </tr>
+          <tr style="outline: 2px solid var(--warn); outline-offset: -1px;">
+            <td class="mono"><strong>UD-Q4_K_XL</strong></td>
+            <td class="n">17.92 GB</td>
+            <td class="n">96.02%</td>
+            <td class="n">0.00955</td>
+            <td><span class="badge warn">94&ndash;97%</span></td>
+            <td>Unsloth</td>
+            <td><strong>Yes + headroom</strong></td>
+          </tr>
+          <tr>
+            <td class="mono">AD-Q5_K_M/Q4_K_M</td>
+            <td class="n">18.55 GB</td>
+            <td class="n">96.43%</td>
+            <td class="n">0.00730</td>
+            <td><span class="badge warn">94&ndash;97%</span></td>
+            <td>AtomicChat</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td class="mono">IQ4_XS</td>
+            <td class="n">16.51 GB</td>
+            <td class="n">95.39%</td>
+            <td class="n">0.01248</td>
+            <td><span class="badge warn">94&ndash;97%</span></td>
+            <td>AtomicChat</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td class="mono">IQ3_S</td>
+            <td class="n">13.84 GB</td>
+            <td class="n">92.41%</td>
+            <td class="n">0.03247</td>
+            <td><span class="badge stop">&lt;94%</span></td>
+            <td>AtomicChat</td>
+            <td>Yes (very tight context)</td>
+          </tr>
+          <tr>
+            <td class="mono">IQ2_S</td>
+            <td class="n">11.14 GB</td>
+            <td class="n">87.18%</td>
+            <td class="n">0.09832</td>
+            <td><span class="badge stop">&lt;94%</span></td>
+            <td>AtomicChat</td>
+            <td>Yes</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Unsloth agentic quality warning:</strong> Below UD-Q2_K_XL, 32-token prediction accuracy drops from 25% to &lt;10%, causing tool-calling failures, excessive looping, and empty responses. For agentic coding, UD-Q4_K_XL is the minimum safe quant. Unsloth&rsquo;s Dynamic v3.0 advantage is real&mdash;UD-Q4_K_XL has KLD 0.00955 vs standard Q4_K_M&rsquo;s 0.02094 at comparable size&mdash;but the gain comes from smarter per-layer precision allocation, not a fundamentally different quantization method.
+    </div>
+  </section>
+
+  <!-- 3. KV Cache -->
+  <section class="section" id="kv">
+    <h2>3. KV Cache Quantization</h2>
+    <p class="section-note">KV cache dtype affects context capacity and accuracy. On Ampere, FP8 KV is storage-only (dequants to BF16 for matmul) but still halves KV memory.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>KV Cache Dtype</th>
+            <th>Memory vs FP16</th>
+            <th>Accuracy Impact</th>
+            <th>Quality</th>
+            <th>Framework</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">FP16 / BF16</td>
+            <td class="n">1.0&times;</td>
+            <td>None (baseline)</td>
+            <td><span class="badge">BASELINE</span></td>
+            <td>All</td>
+          </tr>
+          <tr>
+            <td class="mono">FP8_E5M2</td>
+            <td class="n">0.5&times;</td>
+            <td>&le;0.7 pt across all tasks; near-lossless to 1M tokens</td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>vLLM, SGLang</td>
+          </tr>
+          <tr>
+            <td class="mono">Q8_0</td>
+            <td class="n">0.5&times;</td>
+            <td>~100% quality; +2.2% speed bonus</td>
+            <td><span class="badge">&gt;99%</span></td>
+            <td>llama.cpp</td>
+          </tr>
+          <tr>
+            <td class="mono">Q4 keys only</td>
+            <td class="n">~0.25&times; K</td>
+            <td>~0.4% perplexity increase</td>
+            <td><span class="badge">97&ndash;99%</span></td>
+            <td>llama.cpp, vLLM (experimental)</td>
+          </tr>
+          <tr>
+            <td class="mono">Q4 keys + values</td>
+            <td class="n">0.25&times;</td>
+            <td>~1.4% ppl + 1.5 pt reasoning drop</td>
+            <td><span class="badge warn">CAUTION</span></td>
+            <td>llama.cpp</td>
+          </tr>
+          <tr>
+            <td class="mono">Asymmetric Q4K+Q8V</td>
+            <td class="n">~0.33&times;</td>
+            <td>Better than Q4+Q4</td>
+            <td><span class="badge">97&ndash;99%</span></td>
+            <td>llama.cpp</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Recommendation:</strong> FP8_E5M2 KV cache is the safe default for vLLM/SGLang&mdash;halves KV memory with negligible quality loss. For llama.cpp, Q8_0 KV is effectively free quality.
+    </div>
+  </section>
+
+  <!-- 4. MTP Speculative Decoding -->
+  <section class="section" id="mtp">
+    <h2>4. MTP Speculative Decoding</h2>
+    <p class="section-note">Qwen3.8-27B ships with Multi-Token Prediction heads. Speculative decoding is <strong>mathematically exact</strong>&mdash;rejected drafts are discarded, so output quality is identical to non-speculative. The question is purely speed vs VRAM overhead.</p>
+
+    <h3>MTP Depth Sweep (llama.cpp, single RTX 3090)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>MTP Depth</th>
+            <th>tok/s</th>
+            <th>Speedup</th>
+            <th>Draft Acceptance</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">Off</td>
+            <td class="n">73.6</td>
+            <td class="n">1.00&times;</td>
+            <td>&mdash;</td>
+            <td>Baseline</td>
+          </tr>
+          <tr>
+            <td class="mono">n=1</td>
+            <td class="n">104.8</td>
+            <td class="n">1.42&times;</td>
+            <td>~96% pos-0</td>
+            <td></td>
+          </tr>
+          <tr>
+            <td class="mono">n=2</td>
+            <td class="n">125.5</td>
+            <td class="n">1.70&times;</td>
+            <td>~88% pos-1</td>
+            <td></td>
+          </tr>
+          <tr style="outline: 2px solid var(--warn); outline-offset: -1px;">
+            <td class="mono"><strong>n=3</strong></td>
+            <td class="n"><strong>133.6</strong></td>
+            <td class="n"><strong>1.81&times;</strong></td>
+            <td>~79% pos-2</td>
+            <td><span class="badge warn">PEAK</span> on RTX 3090</td>
+          </tr>
+          <tr>
+            <td class="mono">n=4</td>
+            <td class="n">119.5</td>
+            <td class="n">1.62&times;</td>
+            <td>Diminishing</td>
+            <td>Overhead exceeds gains on Ampere</td>
+          </tr>
+          <tr>
+            <td class="mono">n=5</td>
+            <td class="n">108.8</td>
+            <td class="n">1.48&times;</td>
+            <td></td>
+            <td>Regression vs n=3</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Alternative Speculators</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Source</th>
+            <th>Draft Tokens</th>
+            <th>Mean Acceptance</th>
+            <th>Framework</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Built-in MTP</strong></td>
+            <td>Ships with model weights</td>
+            <td class="n">1&ndash;5</td>
+            <td class="n">56&ndash;77%</td>
+            <td>vLLM, SGLang, llama.cpp</td>
+          </tr>
+          <tr>
+            <td><strong>DSpark</strong><span class="sub">RadixArk/Qwen3.8-27B-DSpark</span></td>
+            <td>1.36B param speculator</td>
+            <td class="n">7</td>
+            <td class="n">3.39 mean tokens</td>
+            <td>SGLang</td>
+          </tr>
+          <tr>
+            <td><strong>DFlash2</strong></td>
+            <td>Block drafter (NInfer/syv-ai)</td>
+            <td class="n">7&ndash;15</td>
+            <td class="n">75%</td>
+            <td>llama.cpp (PR #27342, unmerged), vLLM (syv-ai patches)</td>
+          </tr>
+          <tr>
+            <td><strong>Qwen3-0.6B draft</strong></td>
+            <td>External small model</td>
+            <td class="n">3&ndash;5</td>
+            <td>25&ndash;35% lower than MTP</td>
+            <td>vLLM, SGLang</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5. Serving Frameworks -->
+  <section class="section" id="frameworks">
+    <h2>5. Serving Frameworks</h2>
+    <p class="section-note">Evaluated for Qwen3.8-27B on Ampere RTX 3090s specifically. &ldquo;Day-one&rdquo; means confirmed support at Qwen3.8 launch (Aug 14, 2026).</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Framework</th>
+            <th>Quant Formats</th>
+            <th>MTP</th>
+            <th>Multi-GPU</th>
+            <th>Continuous Batching</th>
+            <th>Strengths</th>
+            <th>Weaknesses for 3090</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>vLLM</strong><span class="sub">v0.26.x</span></td>
+            <td>AutoRound, AWQ, GPTQ (Marlin), FP8, INT8, BF16</td>
+            <td>Yes<span class="sub">native MTP support</span></td>
+            <td>TP, PP</td>
+            <td>Yes</td>
+            <td>Largest ecosystem, CUDAGraphs, prefix caching, chunked prefill, PagedAttention</td>
+            <td>MTP loader can silently load zero params (Qwen3_5MTP bug); CUDAGraph+spec-decode OOM on some configs</td>
+          </tr>
+          <tr>
+            <td><strong>SGLang</strong><span class="sub">v0.4.x</span></td>
+            <td>AWQ, GPTQ, AutoRound (all Marlin), FP8, GGUF, compressed-tensors, BF16</td>
+            <td>Yes<span class="sub">native MTP + DSpark + EAGLE + DFlash + n-gram</span></td>
+            <td>TP, DP (native, cache-aware), EP</td>
+            <td>Yes</td>
+            <td>RadixAttention (up to 5&times; on agentic prefix-heavy workloads); native DP=2 with cache-aware routing (no nginx needed); overlap scheduling; constrained decoding (faster warm grammars than vLLM)</td>
+            <td>MTP adaptive bug on GDN models (fixed PR #23331&mdash;need recent build); can&rsquo;t load FP8 lm_head; no RTX 3090 benchmarks published</td>
+          </tr>
+          <tr>
+            <td><strong>llama.cpp</strong><span class="sub">+ MTP PR #22673</span></td>
+            <td>All GGUF K-quants</td>
+            <td>Yes<span class="sub">--draft-mtp (July 2026)</span></td>
+            <td>Tensor split</td>
+            <td>No</td>
+            <td>GGUF flexibility, Q4 KV cache, excellent single-GPU utilization, simplest deployment</td>
+            <td>No continuous batching, lower throughput at concurrency</td>
+          </tr>
+          <tr>
+            <td><strong>NInfer-3090</strong><span class="sub">community</span></td>
+            <td>INT8, INT4 (custom)</td>
+            <td>Yes<span class="sub">MTP3, ReplaySSM</span></td>
+            <td>Single GPU</td>
+            <td>Cohort batching</td>
+            <td>Purpose-built for 3090; 171K INT8 context; DFlash2 block drafter</td>
+            <td>Narrow support, community project, single GPU only</td>
+          </tr>
+          <tr>
+            <td><strong>ExLlamaV3</strong><span class="sub">+ TabbyAPI</span></td>
+            <td>EXL3 (2&ndash;8 bpw)</td>
+            <td>Unknown</td>
+            <td>gpu-split</td>
+            <td>Limited</td>
+            <td>Best perplexity-per-bit (trellis-coded quant); variable bpw per layer</td>
+            <td>Newest format, smallest ecosystem, batch inference less mature</td>
+          </tr>
+          <tr>
+            <td><strong>TensorRT-LLM</strong></td>
+            <td>AWQ INT4, INT8</td>
+            <td>Unknown</td>
+            <td>TP</td>
+            <td>Yes</td>
+            <td>Optimized NVIDIA kernels; claimed 70% faster than llama.cpp (generic)</td>
+            <td>Complex build pipeline, no Qwen3.8 benchmarks found, low consumer adoption</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6. Deployment Strategies -->
+  <section class="section" id="strategies">
+    <h2>6. Dual-3090 Deployment Strategies</h2>
+    <p class="section-note">Four viable patterns for 2&times; RTX 3090 without NVLink. &ldquo;C=1&rdquo; is single-stream latency; &ldquo;Aggregate&rdquo; is total throughput under concurrent load.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>C=1 tok/s</th>
+            <th>Aggregate tok/s</th>
+            <th>Max Context</th>
+            <th>Requires</th>
+            <th>Best For</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>vLLM 2-Replica + nginx LB</strong><span class="sub">1 vLLM per GPU, nginx least_conn</span></td>
+            <td class="n">~114</td>
+            <td class="n">~400+ (C&ge;4)</td>
+            <td class="n">64K per replica</td>
+            <td>INT4 model (&le;20 GB)</td>
+            <td>Proven pattern from Qwen3.6</td>
+          </tr>
+          <tr style="outline: 2px solid var(--warn); outline-offset: -1px;">
+            <td><strong>SGLang DP=2 + Cache-Aware Router</strong><span class="sub">Single launch cmd, built-in SMG router</span></td>
+            <td class="n">~114</td>
+            <td class="n">~400+ (C&ge;4)<sup class="fn">3</sup></td>
+            <td class="n">64K per replica</td>
+            <td>INT4 model (&le;20 GB)</td>
+            <td><span class="badge warn">AGENTIC</span> prefix-heavy workloads</td>
+          </tr>
+          <tr>
+            <td><strong>TP=2 Single Instance</strong><span class="sub">Both GPUs via tensor-parallel</span></td>
+            <td class="n">~120&ndash;170<sup class="fn">1</sup></td>
+            <td class="n">~270 (C=4)</td>
+            <td class="n">100&ndash;200K</td>
+            <td>Any quant &le;48 GB total</td>
+            <td>Long context, quality-first (FP8/INT8)</td>
+          </tr>
+          <tr>
+            <td><strong>Single GPU</strong><span class="sub">One replica, second GPU free</span></td>
+            <td class="n">~114&ndash;134<sup class="fn">2</sup></td>
+            <td class="n">~1,000 (C=64)</td>
+            <td class="n">64&ndash;240K</td>
+            <td>INT4 model (&le;20 GB)</td>
+            <td>Simplest; high batch throughput; leaves GPU 1 free</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>SGLang DP=2 vs vLLM 2-replica:</strong> SGLang&rsquo;s native data-parallel mode with cache-aware routing is architecturally superior to the nginx LB pattern used in Qwen3.6. The SGLang Model Gateway (SMG) achieves +92% throughput and +275% cache hit rate vs round-robin on prefix-heavy workloads. For agentic coding with repeated system prompts (~1,500&ndash;2,000 tokens), RadixAttention delivers 75&ndash;95% cache hit rates. One launch command vs three containers (2&times; vLLM + nginx).
+    </div>
+    <div class="box">
+      <strong>Verdict from Qwen3.6 work:</strong> For single-user latency, TP=2 and single-GPU are roughly equivalent (~66&ndash;68 tok/s without MTP)&mdash;PCIe allreduce overhead nearly cancels the bandwidth doubling. For concurrent agentic throughput, 2-replica/DP wins decisively. For long context (&gt;64K), TP=2 is necessary to pool VRAM.
+    </div>
+  </section>
+
+  <!-- 7. Published Performance -->
+  <section class="section" id="perf">
+    <h2>7. Published Performance Numbers</h2>
+    <p class="section-note">Numbers from community benchmarks. Sources marked with framework and hardware. <sup class="fn">3.6</sup> = measured on Qwen3.6-27B (same architecture, directly comparable).</p>
+
+    <h3>Single RTX 3090</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Config</th>
+            <th>Framework</th>
+            <th>C=1 tok/s</th>
+            <th>C=8 tok/s</th>
+            <th>Notes</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>W4A16 baseline (no spec)</td>
+            <td>vLLM</td>
+            <td class="n">46</td>
+            <td class="n">&mdash;</td>
+            <td>No optimizations</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>+ MTP-2 (BF16 drafter)</td>
+            <td>vLLM</td>
+            <td class="n">66</td>
+            <td class="n">&mdash;</td>
+            <td>65% acceptance</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>+ MTP-4 + probabilistic + split-KV</td>
+            <td>vLLM</td>
+            <td class="n">93</td>
+            <td class="n">&mdash;</td>
+            <td>69% acceptance</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>+ INT4 lm_head + INT4 MTP (full stack)</td>
+            <td>vLLM</td>
+            <td class="n">114</td>
+            <td class="n">&mdash;</td>
+            <td>74% acceptance</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>+ DFlash2 block drafter</td>
+            <td>vLLM (custom)</td>
+            <td class="n">118&ndash;130</td>
+            <td class="n">&mdash;</td>
+            <td>75% acceptance</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>W4A16, INT8 GEMMs, batch mode</td>
+            <td>vLLM</td>
+            <td class="n">45.5</td>
+            <td class="n">324.9</td>
+            <td>~1,035 tok/s @ C=64</td>
+            <td>syv-ai</td>
+          </tr>
+          <tr>
+            <td>Q4_K_M + MTP n=3 + Q4 KV</td>
+            <td>llama.cpp</td>
+            <td class="n">136.7</td>
+            <td class="n">&mdash;</td>
+            <td>17.4 GB VRAM</td>
+            <td>kgptalkie</td>
+          </tr>
+          <tr>
+            <td>Q4_K_M baseline (no MTP)</td>
+            <td>llama.cpp</td>
+            <td class="n">40.3</td>
+            <td class="n">&mdash;</td>
+            <td>17.7 GB VRAM</td>
+            <td>kgptalkie</td>
+          </tr>
+          <tr>
+            <td>INT8 + MTP3 + ReplaySSM</td>
+            <td>NInfer-3090</td>
+            <td class="n">70.2</td>
+            <td class="n">161.3</td>
+            <td>56&ndash;61% acceptance</td>
+            <td>Don-Chad</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Dual RTX 3090</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Config</th>
+            <th>Framework</th>
+            <th>C=1 tok/s</th>
+            <th>Aggregate</th>
+            <th>Notes</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>W8A16 INT8, TP=2, 1K prompt</td>
+            <td>vLLM</td>
+            <td class="n">65.6</td>
+            <td class="n">&mdash;</td>
+            <td>49.7 tok/s @ 32K prompt</td>
+            <td>lued (HF)</td>
+          </tr>
+          <tr>
+            <td>TP=2, single GPU baseline<sup class="fn">3.6</sup></td>
+            <td>vLLM</td>
+            <td class="n">117&ndash;118</td>
+            <td class="n">&mdash;</td>
+            <td>Narrative text</td>
+            <td>tfriedel</td>
+          </tr>
+          <tr>
+            <td>TP=2 + MTP k=3, code gen<sup class="fn">3.6</sup></td>
+            <td>vLLM</td>
+            <td class="n">264</td>
+            <td class="n">&mdash;</td>
+            <td>Code (high acceptance)</td>
+            <td>tfriedel</td>
+          </tr>
+          <tr>
+            <td>2 replicas + nginx LB, C=4<sup class="fn">3.6</sup></td>
+            <td>vLLM</td>
+            <td class="n">~100</td>
+            <td class="n">225</td>
+            <td>AutoRound INT4, MTP n=3</td>
+            <td>This project</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 8. Accuracy Deep-Dive -->
+  <section class="section" id="accuracy">
+    <h2>8. Accuracy Deep-Dive</h2>
+    <p class="section-note">Qwen3.8-27B baseline scores and measured degradation under quantization. Focus on coding benchmarks since the target use case is agentic coding.</p>
+
+    <h3>Qwen3.8-27B Baseline (BF16)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Benchmark</th>
+            <th>Qwen3.8-27B</th>
+            <th>Qwen3.6-27B</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Terminal-Bench 2.1</td>
+            <td class="n">73.0</td>
+            <td class="n">63.4</td>
+            <td class="n">+9.6</td>
+          </tr>
+          <tr>
+            <td>SWE-bench Pro</td>
+            <td class="n">61.7</td>
+            <td class="n">53.5</td>
+            <td class="n">+8.2</td>
+          </tr>
+          <tr>
+            <td>DeepSWE 1.1</td>
+            <td class="n">42.2</td>
+            <td class="n">13.3</td>
+            <td class="n">+28.9</td>
+          </tr>
+          <tr>
+            <td>LiveCodeBench v6</td>
+            <td class="n">90.3</td>
+            <td class="n">83.9</td>
+            <td class="n">+6.4</td>
+          </tr>
+          <tr>
+            <td>GPQA Diamond</td>
+            <td class="n">89.2</td>
+            <td class="n">87.8</td>
+            <td class="n">+1.4</td>
+          </tr>
+          <tr>
+            <td>IFBench</td>
+            <td class="n">79.5</td>
+            <td class="n">69.1</td>
+            <td class="n">+10.4</td>
+          </tr>
+          <tr>
+            <td>OSWorld-Verified</td>
+            <td class="n">84.3</td>
+            <td class="n">63.9</td>
+            <td class="n">+20.4</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>AutoRound MixedInt4 Recovery (Pilcothink)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Benchmark</th>
+            <th>BF16</th>
+            <th>INT4</th>
+            <th>Recovery</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>MMLU</td>
+            <td class="n">83.49%</td>
+            <td class="n">83.07%</td>
+            <td class="n">99.50%</td>
+          </tr>
+          <tr>
+            <td>GSM8K (flex)</td>
+            <td class="n">72.86%</td>
+            <td class="n">76.12%</td>
+            <td class="n">104.5%</td>
+          </tr>
+          <tr>
+            <td>ARC-Challenge</td>
+            <td class="n">58.87%</td>
+            <td class="n">58.87%</td>
+            <td class="n">100.0%</td>
+          </tr>
+          <tr>
+            <td>HellaSwag</td>
+            <td class="n">82.82%</td>
+            <td class="n">82.40%</td>
+            <td class="n">99.49%</td>
+          </tr>
+          <tr>
+            <td>BoolQ</td>
+            <td class="n">86.64%</td>
+            <td class="n">80.49%</td>
+            <td class="n">92.90%</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="text-align: right;"><strong>Average recovery</strong></td>
+            <td class="n"><strong>99.38%</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>dbirks AutoRound W4A16 (Coding Benchmarks)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Benchmark</th>
+            <th>BF16</th>
+            <th>W4A16 INT4</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>GSM8K</td>
+            <td class="n">91.1%</td>
+            <td class="n">91.7%</td>
+            <td class="n">+0.6 (noise)</td>
+          </tr>
+          <tr>
+            <td>HumanEval</td>
+            <td class="n">93.9%</td>
+            <td class="n">95.7%</td>
+            <td class="n">+1.8 (noise)</td>
+          </tr>
+          <tr>
+            <td>MMLU-Pro</td>
+            <td class="n">81.9%</td>
+            <td class="n">82.6%</td>
+            <td class="n">+0.7 (noise)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>syv-ai Full Optimization Stack Quality</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Benchmark</th>
+            <th>Unquantized</th>
+            <th>Full Stack (INT4+MTP+DFlash2)</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>IFBench</td>
+            <td class="n">79.5</td>
+            <td class="n">78.3</td>
+            <td class="n">&minus;1.2</td>
+          </tr>
+          <tr>
+            <td>GSM8K (exact match)</td>
+            <td class="n">&mdash;</td>
+            <td class="n">96.5%</td>
+            <td class="n">&mdash;</td>
+          </tr>
+          <tr>
+            <td>Perplexity</td>
+            <td class="n">&mdash;</td>
+            <td class="n">8.09</td>
+            <td class="n">&mdash;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Coding quality warning:</strong> One Qwen3.6 study (heyneo) found FP8 preserved HumanEval (39.02% = BF16) while INT4 dropped 8 points (31.10%). If coding quality is paramount, consider FP8 or INT8 on TP=2 over INT4. However, the dbirks Qwen3.8 benchmarks show no HumanEval drop with AutoRound INT4&mdash;calibration method matters significantly.
+    </div>
+  </section>
+
+  <!-- 9. Recommended Benchmark Configs -->
+  <section class="section" id="configs">
+    <h2>9. Recommended Benchmark Configurations</h2>
+    <p class="section-note">Ranked by expected performance &times; quality on our dual RTX 3090s. All configs should be benchmarked with the same prompt shape and concurrency levels for fair comparison.</p>
+
+    <div class="rec-grid">
+
+      <div class="rec-card top">
+        <div class="rec-rank">1</div>
+        <div class="rec-body">
+          <h4>vLLM + AutoRound INT4 + MTP n=3 + 2-Replica LB</h4>
+          <p>Proven pattern from Qwen3.6. Two independent vLLM instances (one per GPU) behind nginx least_conn. AutoRound INT4 via Marlin kernel. FP8 KV cache. Maximum aggregate throughput for concurrent agentic requests.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~114 tok/s C=1</span>
+            <span class="rec-stat">~400+ tok/s C=4 agg</span>
+            <span class="rec-stat">99.4% accuracy</span>
+            <span class="rec-stat">64K ctx/replica</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card top">
+        <div class="rec-rank">2</div>
+        <div class="rec-body">
+          <h4>SGLang DP=2 + AutoRound INT4 + MTP n=3 + Cache-Aware Router</h4>
+          <p>SGLang&rsquo;s native data-parallel mode with SMG cache-aware routing. Architecturally superior to nginx LB&mdash;coordinated prefix routing gives +92% throughput on agentic workloads with shared system prompts. One launch command replaces three containers. RadixAttention delivers 75&ndash;95% cache hit rate on repeated ~1,500-token system prompts.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~114 tok/s C=1</span>
+            <span class="rec-stat">~400+ tok/s C=4 agg</span>
+            <span class="rec-stat">99.4% accuracy</span>
+            <span class="rec-stat">Single launch cmd</span>
+            <span class="rec-stat">Needs PR #23331 fix</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">3</div>
+        <div class="rec-body">
+          <h4>vLLM + AutoRound INT4 + MTP n=3 + TP=2</h4>
+          <p>Single instance across both GPUs. Trades aggregate throughput for double the context window and simpler deployment. Good baseline comparison against the DP/LB patterns.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~120&ndash;170 tok/s C=1</span>
+            <span class="rec-stat">~270 tok/s C=4</span>
+            <span class="rec-stat">99.4% accuracy</span>
+            <span class="rec-stat">128K+ context</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">4</div>
+        <div class="rec-body">
+          <h4>SGLang DP=2 + AWQ INT4 + DSpark Speculator</h4>
+          <p>Tests DSpark (1.36B, 7 tokens/step, mean 3.39 acceptance) against built-in MTP. DSpark claims superior throughput-latency at higher batch sizes. Note: DSpark + INT4 target compatibility is unconfirmed (tested with FP8 target only).</p>
+          <div class="rec-stats">
+            <span class="rec-stat">TBD tok/s</span>
+            <span class="rec-stat">3.39 mean acceptance</span>
+            <span class="rec-stat">~99% accuracy</span>
+            <span class="rec-stat">INT4 compat unconfirmed</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">5</div>
+        <div class="rec-body">
+          <h4>vLLM + AWQ INT4 + MTP n=3 + 2-Replica LB</h4>
+          <p>Same pattern as #1 but with cyankiwi&rsquo;s pre-made AWQ checkpoint. Tests whether AWQ vs AutoRound makes a measurable speed or quality difference. Falls behind SGLang DP on agentic prefix-heavy workloads but is the most battle-tested config.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~100&ndash;114 tok/s C=1</span>
+            <span class="rec-stat">~400+ tok/s C=4 agg</span>
+            <span class="rec-stat">~99% accuracy</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">6</div>
+        <div class="rec-body">
+          <h4>llama.cpp + Unsloth UD-Q4_K_XL + MTP n=3</h4>
+          <p>Simplest deployment. Unsloth Dynamic v3.0 GGUF (17.92 GB, KLD 0.00955) with built-in MTP heads and Q4 KV cache. No continuous batching but excellent single-stream performance. Minimum safe quant for agentic use per Unsloth&rsquo;s own guidance.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~134&ndash;151 tok/s C=1</span>
+            <span class="rec-stat">No batching</span>
+            <span class="rec-stat">96% top-1</span>
+            <span class="rec-stat">17.4 GB VRAM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">7</div>
+        <div class="rec-body">
+          <h4>vLLM + W8A16 INT8 + MTP + TP=2 (Quality-First)</h4>
+          <p>lued&rsquo;s INT8 checkpoint with BF16 MTP drafter included. 99.36% top-1 accuracy. Higher quality than INT4 at the cost of requiring both GPUs for one instance.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~65 tok/s C=1</span>
+            <span class="rec-stat">99.36% accuracy</span>
+            <span class="rec-stat">128K+ context</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">8</div>
+        <div class="rec-body">
+          <h4>vLLM + Official FP8 + TP=2 (Maximum Quality)</h4>
+          <p>Qwen&rsquo;s official FP8 checkpoint. Highest fidelity (&sim;99.9%) at the cost of no compute advantage on Ampere. Tests whether quality difference vs INT4 matters for agentic coding in practice.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~65&ndash;70 tok/s C=1</span>
+            <span class="rec-stat">~99.9% accuracy</span>
+            <span class="rec-stat">128K+ context</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="rec-card">
+        <div class="rec-rank">9</div>
+        <div class="rec-body">
+          <h4>vLLM + syv-ai Full Stack (INT4+INT8 GEMMs+DFlash2) <span class="badge warn">MEASURED WINNER</span></h4>
+          <p>Aggressive custom optimization stack from syv-ai. Requires their patches (INT4 lm_head, probabilistic sampling, split-KV verify). Maximum single-GPU throughput.</p>
+          <div class="rec-stats">
+            <span class="rec-stat">~114&ndash;130 tok/s C=1</span>
+            <span class="rec-stat">~1,000 tok/s C=64</span>
+            <span class="rec-stat">IFBench &minus;1.2 pt</span>
+            <span class="rec-stat">Requires custom patches</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- 10. Measured Results -->
+  <section class="section" id="measured">
+    <h2>10. Measured Results <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Everything below was run on this host, August 22&ndash;24, 2026: 2&times; RTX 3090, driver 580.173, CUDA 13.0, <strong>250 W power cap</strong> unless marked 350 W. Single-stream numbers are 512-token greedy chat completions on a ~46-token prose prompt, mean of 3. Sections 1&ndash;9 are the research; this is what the research predicted versus what happened.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="v">153.9<small>tok/s</small></div><div class="l">Best single-stream &middot; vLLM + DFlash2</div></div>
+      <div class="stat"><div class="v">880<small>tok/s</small></div><div class="l">2 replicas + LB &middot; C=16</div></div>
+      <div class="stat"><div class="v">1,023<small>tok/s</small></div><div class="l">Batch profile &middot; 1 GPU &middot; C=64</div></div>
+      <div class="stat"><div class="v">97.0<small>%</small></div><div class="l">GSM8K n=200 &middot; MTP k=4 greedy</div></div>
+    </div>
+
+    <div class="box">
+      <strong>Verdict:</strong> The research picked the right framework and the wrong speculator. The syv-ai patched vLLM stack (research rank #9) is the clear winner at <strong>153.9 tok/s</strong> with DFlash2, or 135&ndash;150 with MTP&mdash;2.5&times; anything llama.cpp or SGLang produced here, and within noise of the published quality reference. Two of the research&rsquo;s top-ranked configs never ran: stock vLLM 0.27.1 crashed on Ampere (and took GPU 0 off the bus), and SGLang DP=2 died during scheduler init. Deploy as two MTP replicas behind the LB for concurrent agentic work, one DFlash2 replica for a single user, or the batch profile for bulk.
+    </div>
+
+    <div class="box">
+      <strong>Provenance note (audited August 26).</strong> These rows were measured while another campaign ran on the second card. Contention depresses batch-1 decode, so the natural worry is that the whole table reads low.
+      Checked against &sect;12&rsquo;s provably single-tenant coding suite <em>at matched prompt length</em>, a later canonical re-measurement (mean of 5, single-tenant) settled it: <strong>MTP k=4 is 3.9% off and DFlash2 5.3%</strong> &mdash; both at or inside the noise floor. <strong>No correction is needed to this table.</strong>
+      An earlier draft of this note claimed a ~20% understatement; that was wrong, and worth recording as an error of method: it compared this table&rsquo;s ~46-token prompt against 1.1K-context measurements elsewhere.
+      <strong>Draft acceptance rises with context</strong> (0.61 &rarr; 0.78), so those figures differ for reasons that have nothing to do with contention. Prompt length is a condition like any other; comparing across it silently is exactly the mistake the fairness contract in &sect;18 exists to prevent.
+    </div>
+    <h3>Single-Stream Leaderboard (C=1)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Config</th>
+            <th>GPUs</th>
+            <th>Power</th>
+            <th>tok/s</th>
+            <th>vs baseline</th>
+            <th>Accept / mean len</th>
+            <th>Quality</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="hl">
+            <td class="n">1</td>
+            <td><strong>vLLM patched + AutoRound W4A16 + DFlash2 k=7</strong><span class="sub">syv-ai/qwen38-27b-rtx3090 &middot; fast int4 lm_head</span></td>
+            <td class="n">1</td>
+            <td class="n">250 W</td>
+            <td class="n"><strong>153.9</strong></td>
+            <td class="n">4.0&times;</td>
+            <td class="n">4.35 tok/step</td>
+            <td><span class="badge">GSM8K 96.0%</span></td>
+          </tr>
+          <tr>
+            <td class="n">2</td>
+            <td><strong>vLLM patched + AutoRound W4A16 + MTP k=4</strong><span class="sub">same stack, Qwen&rsquo;s own MTP head</span></td>
+            <td class="n">1</td>
+            <td class="n">250 W</td>
+            <td class="n"><strong>135.0 / 150.0</strong><span class="sub">GPU 0 / GPU 1 &mdash; repeatable gap</span></td>
+            <td class="n">3.5&ndash;3.9&times;</td>
+            <td class="n">3.25&ndash;3.4 tok/step</td>
+            <td><span class="badge">GSM8K 97.0%</span></td>
+          </tr>
+          <tr>
+            <td class="n">3</td>
+            <td><strong>llama.cpp + UD-Q4_K_XL + MTP n=1</strong><span class="sub">layer split across both GPUs</span></td>
+            <td class="n">2</td>
+            <td class="n">350 W</td>
+            <td class="n">61.4</td>
+            <td class="n">1.6&times;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge warn">96% top-1 (published)</span></td>
+          </tr>
+          <tr>
+            <td class="n">4</td>
+            <td><strong>llama.cpp + UD-Q4_K_XL + DFlash2-Q8_0 n=4</strong><span class="sub">incoai/Qwen3.8-27B-DFlash2-GGUF &middot; needs PR #27342 build</span></td>
+            <td class="n">1</td>
+            <td class="n">250 W</td>
+            <td class="n">60.7</td>
+            <td class="n">1.8&times; (vs 250 W base)</td>
+            <td class="n">63.9% / 3.55</td>
+            <td><span class="badge warn">96% top-1 (published)</span></td>
+          </tr>
+          <tr>
+            <td class="n">5</td>
+            <td><strong>llama.cpp + UD-Q4_K_XL + MTP n=1</strong></td>
+            <td class="n">1</td>
+            <td class="n">350 W</td>
+            <td class="n">54.5</td>
+            <td class="n">1.4&times;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge warn">96% top-1 (published)</span></td>
+          </tr>
+          <tr>
+            <td class="n">6</td>
+            <td><strong>vLLM patched, batch profile</strong><span class="sub">INT8 activations, fp8 KV, no spec</span></td>
+            <td class="n">1</td>
+            <td class="n">250 W</td>
+            <td class="n">47.6</td>
+            <td class="n">1.2&times;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge">&gt;99% (published)</span></td>
+          </tr>
+          <tr>
+            <td class="n">7</td>
+            <td><strong>SGLang + AutoRound W4A16</strong><span class="sub">lmsysorg/sglang:latest, no spec</span></td>
+            <td class="n">1</td>
+            <td class="n">350 W</td>
+            <td class="n">47.4</td>
+            <td class="n">1.2&times;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge">&gt;99% (published)</span></td>
+          </tr>
+          <tr>
+            <td class="n">8</td>
+            <td><strong>llama.cpp + UD-Q4_K_XL, no spec</strong> (baseline)</td>
+            <td class="n">1</td>
+            <td class="n">350 / 250 W</td>
+            <td class="n">38.7 / 33.3</td>
+            <td class="n">1.0&times;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge warn">96% top-1 (published)</span></td>
+          </tr>
+          <tr class="failed">
+            <td class="n">&mdash;</td>
+            <td><strong>vLLM stock 0.27.1</strong> (research #1/#3/#5)<span class="sub">CUDA-graph OOM at 0.85; Triton GDN autotuner crash under --enforce-eager; NVML error with --language-model-only</span></td>
+            <td class="n">1</td>
+            <td class="n">350 W</td>
+            <td class="n">&mdash;</td>
+            <td colspan="3"><span class="badge stop">FAILED</span> &mdash; third attempt ended in Xid 79</td>
+          </tr>
+          <tr class="failed">
+            <td class="n">&mdash;</td>
+            <td><strong>SGLang DP=2</strong> (research #2)<span class="sub">--dp-size 2: rank 0 scheduler died during init (exit &minus;3)</span></td>
+            <td class="n">2</td>
+            <td class="n">350 W</td>
+            <td class="n">&mdash;</td>
+            <td colspan="3"><span class="badge stop">FAILED</span> &mdash; not retried after the power cap</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Concurrency Scaling</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Deployment</th>
+            <th>C=1</th>
+            <th>C=2</th>
+            <th>C=4</th>
+            <th>C=8</th>
+            <th>C=16</th>
+            <th>C=32</th>
+            <th>C=64</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="hl">
+            <td><strong>2&times; vLLM MTP replicas + nginx least_conn</strong><span class="sub">aggregate tok/s &middot; per-request in parentheses &middot; 512 tok</span></td>
+            <td class="n">151 (151)</td>
+            <td class="n">276 (145)</td>
+            <td class="n">414 (115)</td>
+            <td class="n">620 (85)</td>
+            <td class="n"><strong>880</strong> (59)</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+          </tr>
+          <tr>
+            <td><strong>1&times; vLLM batch profile</strong><span class="sub">INT8 activations, 64 slots &middot; 256 tok (C=64: 512)</span></td>
+            <td class="n">48</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td class="n">537 (34)</td>
+            <td class="n">755 (24)</td>
+            <td class="n"><strong>1,023</strong> (16)<span class="sub">1,165&ndash;1,184 steady-state; GPU was already saturated at 100% util / 249 W, so this figure is contention-insensitive</span></td>
+          </tr>
+          <tr>
+            <td><strong>1&times; vLLM MTP single-user</strong><span class="sub">8 slots &middot; 256 tok</span></td>
+            <td class="n">135</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td class="n">377 (35)</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+          </tr>
+          <tr>
+            <td><strong>1&times; vLLM DFlash2 single-user</strong><span class="sub">8 slots, C=16 queues &middot; 256 tok</span></td>
+            <td class="n">154</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td class="n">300 (48)</td>
+            <td class="n">323 (35)</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box">
+      <strong>Reading the scaling:</strong> the two-replica LB is the best shape up to C&asymp;16 (880 agg with every request still above 59 tok/s). Past that, speculation stops paying and the batch profile&rsquo;s INT8 tensor-core GEMMs take over&mdash;at C=64 one GPU alone delivers 1,023 tok/s, so two batch replicas would clear ~2,000. GPU 1 sat at 249.8 W, 23.1 GiB, 98% KV utilisation at C=64: that is the ceiling at 4K context.
+    </div>
+
+    <h3>DFlash2 Depth Sweep (llama.cpp, GPU 1, 250 W)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr>
+            <th>Draft n</th>
+            <th>tok/s</th>
+            <th>Speedup</th>
+            <th>Draft acceptance</th>
+            <th>Mean accepted len</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">Off</td><td class="n">33.3</td><td class="n">1.00&times;</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td>250 W baseline (38.7 at 350 W)</td></tr>
+          <tr><td class="mono">n=3</td><td class="n">55.1</td><td class="n">1.65&times;</td><td class="n">70.7%</td><td class="n">3.12</td><td></td></tr>
+          <tr class="hl"><td class="mono"><strong>n=4</strong></td><td class="n"><strong>60.7</strong></td><td class="n"><strong>1.82&times;</strong></td><td class="n">63.9%</td><td class="n">3.55</td><td><span class="badge warn">PEAK</span> on RTX 3090</td></tr>
+          <tr><td class="mono">n=5</td><td class="n">60.2</td><td class="n">1.81&times;</td><td class="n">60.2%</td><td class="n">3.99</td><td>Within noise of n=4</td></tr>
+          <tr><td class="mono">n=7</td><td class="n">54.2</td><td class="n">1.63&times;</td><td class="n">47.6%</td><td class="n">4.33</td><td>Model-card recommendation&mdash;worse here; 8-token verify batch costs more than it returns</td></tr>
+          <tr><td class="mono">n=10</td><td class="n">53.4</td><td class="n">1.60&times;</td><td class="n">47.6%</td><td class="n">4.33</td><td>Identical to n=7: drafter is trained for a 7-token block</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">The same DFlash2 drafter is 2.5&times; faster inside vLLM (153.9) than inside llama.cpp (60.7). The multiplier is the framework&rsquo;s verify path&mdash;split-KV verify attention and a CUDA-graphed spec step&mdash;not the drafter. Accepted length on this prose/greedy prompt (3.5&ndash;4.3) is well under the card&rsquo;s 5.3, which is GSM8K with sampling; expect closer to that on code and math.</p>
+
+    <h3>llama.cpp KV-Cache Dtype (llama-bench, 350 W)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Config</th><th>KV dtype</th><th>pp512 tok/s</th><th>tg128 tok/s</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1 GPU</td><td class="mono">f16</td><td class="n">1,027</td><td class="n">38.8</td></tr>
+          <tr><td>1 GPU</td><td class="mono">q8_0</td><td class="n">1,275</td><td class="n">38.7</td></tr>
+          <tr><td>1 GPU</td><td class="mono">q4_0</td><td class="n">1,280</td><td class="n">38.1</td></tr>
+          <tr><td>2 GPU, layer split</td><td class="mono">f16</td><td class="n">1,391</td><td class="n">42.6</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Quantised KV is a free +24% on prompt processing and neutral on generation, confirming section 3. A second GPU buys +35% prefill and only +10% decode&mdash;PCIe layer split is not where the wins are.</p>
+
+    <h3>Quality Gate (patched vLLM, GPU 0)</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Check</th><th>MTP k=4</th><th>DFlash2 k=7</th><th>Reference</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>GSM8K</strong> n=200, greedy, thinking off, C=8</td>
+            <td class="n">97.0% (194/200)</td>
+            <td class="n">96.0% (192/200)</td>
+            <td class="n">96.5% (repo, same setup)</td>
+            <td><span class="badge">PASS</span> &mdash; int4 lm_head/MTP requant costs nothing measurable</td>
+          </tr>
+          <tr>
+            <td><strong>Determinism</strong> 20 prompts, greedy, C=1, same mode run twice</td>
+            <td class="n">20/20 identical</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td><span class="badge">PASS</span></td>
+          </tr>
+          <tr>
+            <td><strong>Same mode, C=1 vs C=8</strong></td>
+            <td class="n">5/20 identical</td>
+            <td class="n">&mdash;</td>
+            <td class="n">&mdash;</td>
+            <td rowspan="2"><span class="badge">EXPECTED</span> bf16 batch-shape nondeterminism (reduction order flips near-tie argmax), not spec-decode error. All 11 divergences are equivalent phrasings (&ldquo;functional approach&rdquo; vs &ldquo;functional programming approach&rdquo;, array vs object wrapper); none truncate, corrupt, or loop.</td>
+          </tr>
+          <tr>
+            <td><strong>DFlash2 vs MTP</strong>, C=1</td>
+            <td class="n" colspan="2">9/20 identical</td>
+            <td class="n">MTP vs itself at C=8: 10/20</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">No non-speculative greedy reference was available from this stack (the launcher has no SPEC=none path), so exactness is established by self-consistency rather than against a plain decode.</p>
+
+    <h3>Incidents &amp; Open Questions</h3>
+    <ul class="incidents">
+      <li><strong>Xid 79 &ldquo;GPU has fallen off the bus&rdquo;</strong> on GPU 0 during stock vLLM&rsquo;s Triton GDN autotuner (rapid idle&harr;350 W transients). Not recoverable without a reboot. Diagnosed as a 12 V-rail brownout; both cards now run at <code>nvidia-smi -pl 250 -pm 1</code> and nothing has faulted since, including 32 s at 249.8 W pinned under C=64. The cap costs ~14% on unassisted llama.cpp decode and is invisible on the vLLM winner.</li>
+      <li><strong>GPU 0 vs GPU 1 gap in MTP mode: 135 vs 150 tok/s</strong>, same image, model, prompt, and power cap, reproduced twice. Unexplained&mdash;candidates are PCIe lane width on slot 1 vs slot 2, or silicon lottery. DFlash2 on GPU 0 (153.9) was not re-run on GPU 1; it may go higher.</li>
+      <li><strong>DFlash2 in llama.cpp needs an unmerged PR</strong> (#27342, <code>z-lab:dflash2</code>); the stock <code>--spec-type draft-dflash</code> only loads v1 drafters. Built separately at <code>a separate build directory</code>.</li>
+      <li><strong>Not yet run:</strong> two batch replicas behind the LB; DFlash2 on GPU 1; a SGLang DP=2 retry at 250 W; DSpark (research #4); any TP=2 config; long-context (&gt;4K) throughput.</li>
+    </ul>
+  </section>
+
+
+  <!-- 11. Context scaling -->
+  <section class="section" id="ctxscaling">
+    <h2>11. Speed vs Context Length <span class="badge">THIS MACHINE</span></h2>
+    <div class="box" style="border-left-color: var(--stop); background: var(--stop-bg);">
+      <strong style="color: var(--stop);">Correction (August 26, 2026) &mdash; these curves were measured under cross-GPU contention.</strong>
+      The two sweeps that produced this section ran <em>concurrently</em>, one per card, on the assumption that separate GPUs are independent. They are not: the cards share PCIe, host memory bandwidth and CPU, and batch-1 decode is launch-latency sensitive. Re-running the identical summarization task on an otherwise idle machine gives <strong>95.8 tok/s where this section reports 36.9</strong>; deliberately loading the second GPU pulls the same measurement back down to 58.0. Section 12 has the isolated numbers.
+      <br><br>
+      <strong>What is affected:</strong> every vLLM curve and the llama.cpp 1-GPU curve above ran against a busy neighbour. The llama.cpp 2-GPU curve is the one clean line in the &le;64K sweep &mdash; it owned both cards. <em>A later provenance audit narrowed this further:</em> the llama.cpp 64K&ndash;250K long-context line is <strong>also contended</strong> in both its original and resumed windows, and the &ldquo;Beyond 64K&rdquo; table below inherits that. Because the contamination is uneven, the <em>ranking</em> in this section is unreliable, not merely its absolute values: the configs that look competitive here are partly just the ones that were measured while the other card was quiet. The shapes of the curves (decay with context, linear TTFT) survive; the cross-config comparison does not. It has not been re-run &mdash; a clean sweep is roughly a day of GPU time.
+    </div>
+    <p class="section-note">Section 10&rsquo;s leaderboard used a 46-token prompt. That flatters every speculative config, because a short open-ended prompt is the easiest possible draft target. These curves re-run the top five configs across the full context window on one fixed task &mdash; <em>&ldquo;write a detailed technical summary of the documents above, then list ten concrete recommendations&rdquo;</em> over a growing prefix of real, non-repeating technical prose (llama.cpp and vLLM documentation, ~1.9 tokens/word). 256-token greedy completions, mean of 2 after a warm run, prompt caching disabled on both frameworks so time-to-first-token is comparable. Prompt length is calibrated per request against each server&rsquo;s own tokenizer.</p>
+
+    <div class="box">
+      <strong>The ranking inverts with context.</strong> vLLM + DFlash2 leads the field at 512 tokens (94.8 tok/s, half again the next config) and has fallen <em>behind both llama.cpp MTP configs</em> by 16K &mdash; fourth of five. llama.cpp across both GPUs is the flattest curve in the set &mdash; 61.7 &rarr; 37.1 tok/s from 512 to 57K, a 40% decay where DFlash2 loses 60% by 32K. If your workload is long-context, the config that wins the benchmark table is not the config to deploy.
+    </div>
+
+<div class="viz-block">
+<div class="legend viz-legend"><span class="lg"><i class="key s1"></i>vLLM patched + DFlash2 k=7</span>
+<span class="lg"><i class="key s2"></i>vLLM patched + MTP k=4</span>
+<span class="lg"><i class="key s3"></i>llama.cpp MTP n=1, 2 GPU</span>
+<span class="lg"><i class="key s4"></i>llama.cpp DFlash2 n=4</span>
+<span class="lg"><i class="key s5"></i>llama.cpp MTP n=1, 1 GPU</span></div>
+<figure class="fig"><figcaption>Decode speed vs prompt length</figcaption><svg class="chart" viewBox="0 0 760 340" role="img" aria-labelledby="ctx-tps-t" data-chart="ctx-tps">
+<title id="ctx-tps-t">Decode tok/s vs prompt tokens</title>
+<line class="grid" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="tick" x="48" y="300.0" text-anchor="end">0</text>
+<line class="grid" x1="56" x2="592" y1="241.7" y2="241.7"/>
+<text class="tick" x="48" y="245.7" text-anchor="end">20</text>
+<line class="grid" x1="56" x2="592" y1="187.4" y2="187.4"/>
+<text class="tick" x="48" y="191.4" text-anchor="end">40</text>
+<line class="grid" x1="56" x2="592" y1="133.1" y2="133.1"/>
+<text class="tick" x="48" y="137.1" text-anchor="end">60</text>
+<line class="grid" x1="56" x2="592" y1="78.8" y2="78.8"/>
+<text class="tick" x="48" y="82.8" text-anchor="end">80</text>
+<line class="grid" x1="56" x2="592" y1="24.5" y2="24.5"/>
+<text class="tick" x="48" y="28.5" text-anchor="end">100</text>
+<text class="tick" x="81.8" y="314" text-anchor="middle">512</text>
+<text class="tick" x="227.0" y="314" text-anchor="middle">2K</text>
+<text class="tick" x="372.2" y="314" text-anchor="middle">8K</text>
+<text class="tick" x="444.8" y="314" text-anchor="middle">16K</text>
+<text class="tick" x="517.3" y="314" text-anchor="middle">32K</text>
+<text class="tick" x="589.9" y="314" text-anchor="middle">64K</text>
+<line class="axis" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="axlbl" x="324" y="334" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s1" d="M80.8,38.6 L231.5,116.2 L373.7,158.6 L445.0,191.5 L517.3,201.5 L581.2,130.1"/>
+<circle class="pt s1" cx="80.8" cy="38.6" r="4" data-x="507" data-v="94.8"/>
+<circle class="pt s1" cx="231.5" cy="116.2" r="4" data-x="2137" data-v="66.2"/>
+<circle class="pt s1" cx="373.7" cy="158.6" r="4" data-x="8313" data-v="50.6"/>
+<circle class="pt s1" cx="445.0" cy="191.5" r="4" data-x="16426" data-v="38.5"/>
+<circle class="pt s1" cx="517.3" cy="201.5" r="4" data-x="32740" data-v="34.8"/>
+<circle class="pt s1" cx="581.2" cy="130.1" r="4" data-x="60277" data-v="61.1"/>
+<path class="ln s2" d="M80.8,113.0 L231.5,141.2 L373.7,161.1 L445.0,154.8 L517.3,195.8 L581.2,185.5"/>
+<circle class="pt s2" cx="80.8" cy="113.0" r="4" data-x="507" data-v="67.4"/>
+<circle class="pt s2" cx="231.5" cy="141.2" r="4" data-x="2137" data-v="57.0"/>
+<circle class="pt s2" cx="373.7" cy="161.1" r="4" data-x="8313" data-v="49.7"/>
+<circle class="pt s2" cx="445.0" cy="154.8" r="4" data-x="16426" data-v="52.0"/>
+<circle class="pt s2" cx="517.3" cy="195.8" r="4" data-x="32740" data-v="36.9"/>
+<circle class="pt s2" cx="581.2" cy="185.5" r="4" data-x="60277" data-v="40.7"/>
+<path class="ln s3" d="M80.2,128.5 L229.2,130.6 L370.8,145.0 L446.6,148.0 L514.6,172.5 L576.0,195.3"/>
+<circle class="pt s3" cx="80.2" cy="128.5" r="4" data-x="504" data-v="61.7"/>
+<circle class="pt s3" cx="229.2" cy="130.6" r="4" data-x="2092" data-v="60.9"/>
+<circle class="pt s3" cx="370.8" cy="145.0" r="4" data-x="8083" data-v="55.6"/>
+<circle class="pt s3" cx="446.6" cy="148.0" r="4" data-x="16671" data-v="54.5"/>
+<circle class="pt s3" cx="514.6" cy="172.5" r="4" data-x="31925" data-v="45.5"/>
+<circle class="pt s3" cx="576.0" cy="195.3" r="4" data-x="57349" data-v="37.1"/>
+<path class="ln s4" d="M80.8,174.6 L231.5,182.2 L373.7,184.7 L445.0,207.2 L517.3,202.9 L576.0,215.9"/>
+<circle class="pt s4" cx="80.8" cy="174.6" r="4" data-x="507" data-v="44.7"/>
+<circle class="pt s4" cx="231.5" cy="182.2" r="4" data-x="2137" data-v="41.9"/>
+<circle class="pt s4" cx="373.7" cy="184.7" r="4" data-x="8313" data-v="41.0"/>
+<circle class="pt s4" cx="445.0" cy="207.2" r="4" data-x="16426" data-v="32.7"/>
+<circle class="pt s4" cx="517.3" cy="202.9" r="4" data-x="32740" data-v="34.3"/>
+<circle class="pt s4" cx="576.0" cy="215.9" r="4" data-x="57349" data-v="29.5"/>
+<path class="ln s5" d="M80.2,168.7 L229.2,170.3 L370.8,180.3 L446.6,182.0 L514.6,195.0 L576.0,203.1"/>
+<circle class="pt s5" cx="80.2" cy="168.7" r="4" data-x="504" data-v="46.9"/>
+<circle class="pt s5" cx="229.2" cy="170.3" r="4" data-x="2092" data-v="46.3"/>
+<circle class="pt s5" cx="370.8" cy="180.3" r="4" data-x="8083" data-v="42.6"/>
+<circle class="pt s5" cx="446.6" cy="182.0" r="4" data-x="16671" data-v="42.0"/>
+<circle class="pt s5" cx="514.6" cy="195.0" r="4" data-x="31925" data-v="37.2"/>
+<circle class="pt s5" cx="576.0" cy="203.1" r="4" data-x="57349" data-v="34.2"/>
+<line class="key s1" x1="602" x2="614" y1="130.1" y2="130.1"/>
+<text class="endlbl" x="618" y="134.1"><tspan class="val">61</tspan> <tspan class="nm">vLLM DFlash2</tspan></text>
+<line class="key s2" x1="602" x2="614" y1="185.5" y2="185.5"/>
+<text class="endlbl" x="618" y="189.5"><tspan class="val">41</tspan> <tspan class="nm">vLLM MTP</tspan></text>
+<line class="leader" x1="582.0" y1="195.3" x2="600" y2="199.5"/>
+<line class="key s3" x1="602" x2="614" y1="199.5" y2="199.5"/>
+<text class="endlbl" x="618" y="203.5"><tspan class="val">37</tspan> <tspan class="nm">llama.cpp MTP 2×GPU</tspan></text>
+<line class="leader" x1="582.0" y1="203.1" x2="600" y2="213.5"/>
+<line class="key s5" x1="602" x2="614" y1="213.5" y2="213.5"/>
+<text class="endlbl" x="618" y="217.5"><tspan class="val">34</tspan> <tspan class="nm">llama.cpp MTP 1×GPU</tspan></text>
+<line class="leader" x1="582.0" y1="215.9" x2="600" y2="227.5"/>
+<line class="key s4" x1="602" x2="614" y1="227.5" y2="227.5"/>
+<text class="endlbl" x="618" y="231.5"><tspan class="val">30</tspan> <tspan class="nm">llama.cpp DFlash2</tspan></text>
+</svg></figure>
+<figure class="fig"><figcaption>Time to first token vs prompt length</figcaption><svg class="chart" viewBox="0 0 760 340" role="img" aria-labelledby="ctx-ttft-t" data-chart="ctx-ttft">
+<title id="ctx-ttft-t">Time to first token (s) vs prompt tokens</title>
+<line class="grid" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="tick" x="48" y="300.0" text-anchor="end">0</text>
+<line class="grid" x1="56" x2="592" y1="246.1" y2="246.1"/>
+<text class="tick" x="48" y="250.1" text-anchor="end">20</text>
+<line class="grid" x1="56" x2="592" y1="196.3" y2="196.3"/>
+<text class="tick" x="48" y="200.3" text-anchor="end">40</text>
+<line class="grid" x1="56" x2="592" y1="146.4" y2="146.4"/>
+<text class="tick" x="48" y="150.4" text-anchor="end">60</text>
+<line class="grid" x1="56" x2="592" y1="96.5" y2="96.5"/>
+<text class="tick" x="48" y="100.5" text-anchor="end">80</text>
+<line class="grid" x1="56" x2="592" y1="46.7" y2="46.7"/>
+<text class="tick" x="48" y="50.7" text-anchor="end">100</text>
+<text class="tick" x="81.8" y="314" text-anchor="middle">512</text>
+<text class="tick" x="227.0" y="314" text-anchor="middle">2K</text>
+<text class="tick" x="372.2" y="314" text-anchor="middle">8K</text>
+<text class="tick" x="444.8" y="314" text-anchor="middle">16K</text>
+<text class="tick" x="517.3" y="314" text-anchor="middle">32K</text>
+<text class="tick" x="589.9" y="314" text-anchor="middle">64K</text>
+<line class="axis" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="axlbl" x="324" y="334" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s1" d="M80.8,294.2 L231.5,289.3 L373.7,267.2 L445.0,233.9 L517.3,164.2 L581.2,121.2"/>
+<circle class="pt s1" cx="80.8" cy="294.2" r="4" data-x="507" data-v="0.714"/>
+<circle class="pt s1" cx="231.5" cy="289.3" r="4" data-x="2137" data-v="2.689"/>
+<circle class="pt s1" cx="373.7" cy="267.2" r="4" data-x="8313" data-v="11.557"/>
+<circle class="pt s1" cx="445.0" cy="233.9" r="4" data-x="16426" data-v="24.909"/>
+<circle class="pt s1" cx="517.3" cy="164.2" r="4" data-x="32740" data-v="52.847"/>
+<circle class="pt s1" cx="581.2" cy="121.2" r="4" data-x="60277" data-v="70.099"/>
+<path class="ln s2" d="M80.8,294.0 L231.5,288.4 L373.7,265.5 L445.0,246.6 L517.3,164.1 L581.2,38.6"/>
+<circle class="pt s2" cx="80.8" cy="294.0" r="4" data-x="507" data-v="0.812"/>
+<circle class="pt s2" cx="231.5" cy="288.4" r="4" data-x="2137" data-v="3.048"/>
+<circle class="pt s2" cx="373.7" cy="265.5" r="4" data-x="8313" data-v="12.218"/>
+<circle class="pt s2" cx="445.0" cy="246.6" r="4" data-x="16426" data-v="19.819"/>
+<circle class="pt s2" cx="517.3" cy="164.1" r="4" data-x="32740" data-v="52.893"/>
+<circle class="pt s2" cx="581.2" cy="38.6" r="4" data-x="60277" data-v="103.242"/>
+<path class="ln s3" d="M80.2,294.6 L229.2,291.9 L370.8,282.0 L446.6,266.7 L514.6,232.0 L576.0,143.5"/>
+<circle class="pt s3" cx="80.2" cy="294.6" r="4" data-x="504" data-v="0.549"/>
+<circle class="pt s3" cx="229.2" cy="291.9" r="4" data-x="2092" data-v="1.651"/>
+<circle class="pt s3" cx="370.8" cy="282.0" r="4" data-x="8083" data-v="5.626"/>
+<circle class="pt s3" cx="446.6" cy="266.7" r="4" data-x="16671" data-v="11.768"/>
+<circle class="pt s3" cx="514.6" cy="232.0" r="4" data-x="31925" data-v="25.654"/>
+<circle class="pt s3" cx="576.0" cy="143.5" r="4" data-x="57349" data-v="61.172"/>
+<path class="ln s4" d="M80.8,294.4 L231.5,290.1 L373.7,274.7 L445.0,251.9 L517.3,202.3 L576.0,114.5"/>
+<circle class="pt s4" cx="80.8" cy="294.4" r="4" data-x="507" data-v="0.641"/>
+<circle class="pt s4" cx="231.5" cy="290.1" r="4" data-x="2137" data-v="2.384"/>
+<circle class="pt s4" cx="373.7" cy="274.7" r="4" data-x="8313" data-v="8.562"/>
+<circle class="pt s4" cx="445.0" cy="251.9" r="4" data-x="16426" data-v="17.673"/>
+<circle class="pt s4" cx="517.3" cy="202.3" r="4" data-x="32740" data-v="37.584"/>
+<circle class="pt s4" cx="576.0" cy="114.5" r="4" data-x="57349" data-v="72.798"/>
+<path class="ln s5" d="M80.2,294.6 L229.2,290.8 L370.8,276.9 L446.6,255.1 L514.6,211.6 L576.0,125.1"/>
+<circle class="pt s5" cx="80.2" cy="294.6" r="4" data-x="504" data-v="0.573"/>
+<circle class="pt s5" cx="229.2" cy="290.8" r="4" data-x="2092" data-v="2.086"/>
+<circle class="pt s5" cx="370.8" cy="276.9" r="4" data-x="8083" data-v="7.678"/>
+<circle class="pt s5" cx="446.6" cy="255.1" r="4" data-x="16671" data-v="16.393"/>
+<circle class="pt s5" cx="514.6" cy="211.6" r="4" data-x="31925" data-v="33.852"/>
+<circle class="pt s5" cx="576.0" cy="125.1" r="4" data-x="57349" data-v="68.564"/>
+<line class="key s2" x1="602" x2="614" y1="38.6" y2="38.6"/>
+<text class="endlbl" x="618" y="42.6"><tspan class="val">103</tspan> <tspan class="nm">vLLM MTP</tspan></text>
+<line class="key s4" x1="602" x2="614" y1="114.5" y2="114.5"/>
+<text class="endlbl" x="618" y="118.5"><tspan class="val">73</tspan> <tspan class="nm">llama.cpp DFlash2</tspan></text>
+<line class="leader" x1="587.2" y1="121.2" x2="600" y2="128.5"/>
+<line class="key s1" x1="602" x2="614" y1="128.5" y2="128.5"/>
+<text class="endlbl" x="618" y="132.5"><tspan class="val">70</tspan> <tspan class="nm">vLLM DFlash2</tspan></text>
+<line class="leader" x1="582.0" y1="125.1" x2="600" y2="142.5"/>
+<line class="key s5" x1="602" x2="614" y1="142.5" y2="142.5"/>
+<text class="endlbl" x="618" y="146.5"><tspan class="val">69</tspan> <tspan class="nm">llama.cpp MTP 1×GPU</tspan></text>
+<line class="leader" x1="582.0" y1="143.5" x2="600" y2="156.5"/>
+<line class="key s3" x1="602" x2="614" y1="156.5" y2="156.5"/>
+<text class="endlbl" x="618" y="160.5"><tspan class="val">61</tspan> <tspan class="nm">llama.cpp MTP 2×GPU</tspan></text>
+</svg></figure>
+<div class="legend viz-legend"><span class="lg"><i class="key s1"></i>vLLM CTX=long (fp8 KV) + MTP k=3</span>
+<span class="lg"><i class="key s2"></i>vLLM CTX=long (fp8 KV) + DFlash2</span>
+<span class="lg"><i class="key s3"></i>vLLM CTX=huge (KVarN 4/2-bit) + MTP</span>
+<span class="lg"><i class="key s4"></i>llama.cpp MTP n=1, q8 KV, 262K ctx</span></div><figure class="fig"><figcaption>Beyond 64K &mdash; long-context profiles, decode speed vs prompt length</figcaption><svg class="chart" viewBox="0 0 760 340" role="img" aria-labelledby="ctx-long-tps-t" data-chart="ctx-long-tps">
+<title id="ctx-long-tps-t">Decode tok/s vs prompt tokens</title>
+<line class="grid" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="tick" x="48" y="300.0" text-anchor="end">0</text>
+<line class="grid" x1="56" x2="592" y1="255.7" y2="255.7"/>
+<text class="tick" x="48" y="259.7" text-anchor="end">10</text>
+<line class="grid" x1="56" x2="592" y1="215.4" y2="215.4"/>
+<text class="tick" x="48" y="219.4" text-anchor="end">20</text>
+<line class="grid" x1="56" x2="592" y1="175.2" y2="175.2"/>
+<text class="tick" x="48" y="179.2" text-anchor="end">30</text>
+<line class="grid" x1="56" x2="592" y1="134.9" y2="134.9"/>
+<text class="tick" x="48" y="138.9" text-anchor="end">40</text>
+<line class="grid" x1="56" x2="592" y1="94.6" y2="94.6"/>
+<text class="tick" x="48" y="98.6" text-anchor="end">50</text>
+<line class="grid" x1="56" x2="592" y1="54.3" y2="54.3"/>
+<text class="tick" x="48" y="58.3" text-anchor="end">60</text>
+<text class="tick" x="159.8" y="314" text-anchor="middle">64K</text>
+<text class="tick" x="322.0" y="314" text-anchor="middle">100K</text>
+<text class="tick" x="477.5" y="314" text-anchor="middle">150K</text>
+<text class="tick" x="587.9" y="314" text-anchor="middle">200K</text>
+<line class="axis" x1="56" x2="592" y1="296.0" y2="296.0"/>
+<text class="axlbl" x="324" y="334" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s1" d="M175.6,86.9 L318.6,49.1 L476.3,38.6"/>
+<circle class="pt s1" cx="175.6" cy="86.9" r="4" data-x="68294" data-v="51.9"/>
+<circle class="pt s1" cx="318.6" cy="49.1" r="4" data-x="99138" data-v="61.3"/>
+<circle class="pt s1" cx="476.3" cy="38.6" r="4" data-x="149525" data-v="63.9"/>
+<path class="ln s2" d="M175.6,178.8 L318.6,138.1 L416.7,140.1"/>
+<circle class="pt s2" cx="175.6" cy="178.8" r="4" data-x="68294" data-v="29.1"/>
+<circle class="pt s2" cx="318.6" cy="138.1" r="4" data-x="99138" data-v="39.2"/>
+<circle class="pt s2" cx="416.7" cy="140.1" r="4" data-x="128013" data-v="38.7"/>
+<path class="ln s3" d="M318.6,155.8 L481.4,186.8 L573.3,200.5"/>
+<circle class="pt s3" cx="318.6" cy="155.8" r="4" data-x="99138" data-v="34.8"/>
+<circle class="pt s3" cx="481.4" cy="186.8" r="4" data-x="151530" data-v="27.1"/>
+<circle class="pt s3" cx="573.3" cy="200.5" r="4" data-x="192517" data-v="23.7"/>
+<path class="ln s4" d="M175.6,164.3 L318.6,174.7 L481.4,194.5"/>
+<circle class="pt s4" cx="175.6" cy="164.3" r="4" data-x="68294" data-v="32.7"/>
+<circle class="pt s4" cx="318.6" cy="174.7" r="4" data-x="99138" data-v="30.1"/>
+<circle class="pt s4" cx="481.4" cy="194.5" r="4" data-x="151530" data-v="25.2"/>
+<line class="key s1" x1="602" x2="614" y1="38.6" y2="38.6"/>
+<text class="endlbl" x="618" y="42.6"><tspan class="val">64</tspan> <tspan class="nm">vLLM long MTP</tspan></text>
+<line class="key s2" x1="602" x2="614" y1="140.1" y2="140.1"/>
+<text class="endlbl" x="618" y="144.1"><tspan class="val">39</tspan> <tspan class="nm">vLLM long DFlash2</tspan></text>
+<line class="key s4" x1="602" x2="614" y1="194.5" y2="194.5"/>
+<text class="endlbl" x="618" y="198.5"><tspan class="val">25</tspan> <tspan class="nm">llama.cpp MTP 262K</tspan></text>
+<line class="leader" x1="579.3" y1="200.5" x2="600" y2="208.5"/>
+<line class="key s3" x1="602" x2="614" y1="208.5" y2="208.5"/>
+<text class="endlbl" x="618" y="212.5"><tspan class="val">24</tspan> <tspan class="nm">vLLM huge MTP</tspan></text>
+</svg></figure>
+<details class="viz-table"><summary>Table view</summary><div class="tw"><table><thead><tr><th>Config</th><th>504</th><th>507</th><th>2K</th><th>2K</th><th>7K</th><th>8K</th><th>16K</th><th>16K</th><th>31K</th><th>31K</th><th>56K</th><th>58K</th></tr></thead><tbody><tr><td><strong>vLLM patched + DFlash2 k=7</strong></td><td class="n">&mdash;</td><td class="n">94.8<span class="sub">0.71s</span></td><td class="n">&mdash;</td><td class="n">66.2<span class="sub">2.69s</span></td><td class="n">&mdash;</td><td class="n">50.6<span class="sub">11.56s</span></td><td class="n">38.5<span class="sub">24.91s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">34.8<span class="sub">52.85s</span></td><td class="n">&mdash;</td><td class="n">61.1<span class="sub">70.10s</span></td></tr><tr><td><strong>vLLM patched + MTP k=4</strong></td><td class="n">&mdash;</td><td class="n">67.4<span class="sub">0.81s</span></td><td class="n">&mdash;</td><td class="n">57.0<span class="sub">3.05s</span></td><td class="n">&mdash;</td><td class="n">49.7<span class="sub">12.22s</span></td><td class="n">52.0<span class="sub">19.82s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">36.9<span class="sub">52.89s</span></td><td class="n">&mdash;</td><td class="n">40.7<span class="sub">103.24s</span></td></tr><tr><td><strong>llama.cpp MTP n=1, 2 GPU</strong></td><td class="n">61.7<span class="sub">0.55s</span></td><td class="n">&mdash;</td><td class="n">60.9<span class="sub">1.65s</span></td><td class="n">&mdash;</td><td class="n">55.6<span class="sub">5.63s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">54.5<span class="sub">11.77s</span></td><td class="n">45.5<span class="sub">25.65s</span></td><td class="n">&mdash;</td><td class="n">37.1<span class="sub">61.17s</span></td><td class="n">&mdash;</td></tr><tr><td><strong>llama.cpp DFlash2 n=4</strong></td><td class="n">&mdash;</td><td class="n">44.7<span class="sub">0.64s</span></td><td class="n">&mdash;</td><td class="n">41.9<span class="sub">2.38s</span></td><td class="n">&mdash;</td><td class="n">41.0<span class="sub">8.56s</span></td><td class="n">32.7<span class="sub">17.67s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">34.3<span class="sub">37.58s</span></td><td class="n">29.5<span class="sub">72.80s</span></td><td class="n">&mdash;</td></tr><tr><td><strong>llama.cpp MTP n=1, 1 GPU</strong></td><td class="n">46.9<span class="sub">0.57s</span></td><td class="n">&mdash;</td><td class="n">46.3<span class="sub">2.09s</span></td><td class="n">&mdash;</td><td class="n">42.6<span class="sub">7.68s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">42.0<span class="sub">16.39s</span></td><td class="n">37.2<span class="sub">33.85s</span></td><td class="n">&mdash;</td><td class="n">34.2<span class="sub">68.56s</span></td><td class="n">&mdash;</td></tr></tbody></table></div><div class="tw"><table><thead><tr><th>Long-context profile</th><th>68K</th><th>99K</th><th>128K</th><th>150K</th><th>152K</th><th>193K</th></tr></thead><tbody><tr><td><strong>vLLM CTX=long (fp8 KV) + MTP k=3</strong></td><td class="n">51.9<span class="sub">104s</span></td><td class="n">61.3<span class="sub">136s</span></td><td class="n">&mdash;</td><td class="n">63.9<span class="sub">239s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td></tr><tr><td><strong>vLLM CTX=long (fp8 KV) + DFlash2</strong></td><td class="n">29.1<span class="sub">214s</span></td><td class="n">39.2<span class="sub">313s</span></td><td class="n">38.7<span class="sub">421s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">&mdash;</td></tr><tr><td><strong>vLLM CTX=huge (KVarN 4/2-bit) + MTP</strong></td><td class="n">&mdash;</td><td class="n">34.8<span class="sub">132s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">27.1<span class="sub">234s</span></td><td class="n">23.7<span class="sub">331s</span></td></tr><tr><td><strong>llama.cpp MTP n=1, q8 KV, 262K ctx</strong></td><td class="n">32.7<span class="sub">86s</span></td><td class="n">30.1<span class="sub">145s</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">25.2<span class="sub">278s</span></td><td class="n">&mdash;</td></tr></tbody></table></div><p class="section-note">Cells: decode tok/s, with TTFT beneath. 256-token greedy completions, mean of 2 after a warm run; prompt is a growing prefix of real technical documentation, calibrated to the target token count by each serverprompt is filler prose calibrated to the target token count by each server&rsquo;s own tokenizer.rsquo;s own tokenizer.</p></details>
+</div>
+
+    <div class="box">
+      <strong>Time to first token is linear and unassisted.</strong> Speculative decoding accelerates generation, not prefill, so TTFT tracks prompt length at roughly 1.7 ms/token on vLLM and 1.1 ms/token on llama.cpp&rsquo;s two-GPU split &mdash; the one place the second card clearly earns its keep (61 s vs 69&ndash;73 s at 57K, and 26 s vs 34&ndash;38 s at 32K). At 150K a single request waits about four minutes before its first token; at 192K, five and a half. Prefix caching, off here for measurement, is what makes those numbers survivable in a real chat or RAG front-end &mdash; the repo reports a 24K document dropping from ~23 s to ~1 s on turn two.
+    </div>
+
+    <h3>Beyond 64K &mdash; what each profile costs</h3>
+    <p class="section-note">The 64K ceiling in the charts above is the deployed profile&rsquo;s, not the model&rsquo;s: Qwen3.8 is 262K native. Reaching further means changing the KV cache, and each option pays differently.</p>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Profile</th><th>KV cache</th><th>Max reached</th><th>Decode at max</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr class="hl">
+            <td><strong>vLLM <code>CTX=long</code> + MTP k=3</strong></td>
+            <td class="mono">fp8 (FlashInfer)</td>
+            <td class="n">149,525</td>
+            <td class="n">63.9 tok/s</td>
+            <td>Best long-context config by a wide margin &mdash; and it gets <em>faster</em> with depth (51.9 &rarr; 63.9)</td>
+          </tr>
+          <tr>
+            <td><strong>vLLM <code>CTX=long</code> + DFlash2</strong></td>
+            <td class="mono">int8 per-token-head</td>
+            <td class="n">128,013</td>
+            <td class="n">38.7 tok/s</td>
+            <td>Its own launcher caps this path at 128K; slower than MTP at every depth</td>
+          </tr>
+          <tr>
+            <td><strong>vLLM <code>CTX=huge</code> + MTP</strong></td>
+            <td class="mono">KVarN 4/2-bit</td>
+            <td class="n">192,517</td>
+            <td class="n">23.7 tok/s</td>
+            <td>Deepest context on one 24 GB card. Take it when the request would not otherwise fit, not for speed</td>
+          </tr>
+          <tr>
+            <td><strong>llama.cpp MTP n=1</strong></td>
+            <td class="mono">q8_0</td>
+            <td class="n">151,530</td>
+            <td class="n">25.2 tok/s</td>
+            <td>Decays steadily; 200K+ fails to allocate on a single card (<code>-c 200000</code> OOMs at load)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box" style="border-left-color: var(--stop); background: var(--stop-bg);">
+      <strong style="color: var(--stop);">Per-row provenance.</strong> A later audit established that these four rows were <em>not</em> measured under equal conditions.
+      <code>CTX=long</code> + MTP (the apparent winner) and <code>CTX=long</code> + DFlash2 were both measured while a llama.cpp server was live on the other card;
+      the llama.cpp row is contended throughout. Only <strong><code>CTX=huge</code> KVarN is clean.</strong>
+      The direction matters: contention <em>depresses</em> results, so the winner&rsquo;s true figure is <strong>higher</strong> than 63.9 &mdash;
+      the table understates the gap between the fp8 profile and the rest rather than inventing one. No clean replacement has been measured.
+    </div>
+    <p class="section-note">Two caveats on the KVarN row. The repo documents <code>CTX=huge</code> at 245,760 tokens, but the launcher resolved <code>max-model-len</code> to 200,000 on this host, so 192.5K is the deepest point measured rather than a hard ceiling. And 240K was never reached: the harness&rsquo;s length calibrator refused to build a prompt past the resolved limit.</p>
+
+    <div class="box">
+      <strong>Read the bumps as content, not context.</strong> Several curves rise where they should fall &mdash; vLLM MTP from 8K to 16K, DFlash2 from 32K to 60K, the whole <code>CTX=long</code> MTP line. Draft acceptance depends on how predictable the text is, and a longer prefix of coherent documentation is <em>easier</em> to draft against than a short one. The 60K points on both vLLM curves were also measured with a separate script over different source text after the main harness overshot the token limit, so that segment compares two prompts as much as two lengths. Treat every number here as specific to summarization over technical prose; on code, where draft acceptance is highest, expect the whole field to shift up and the gaps to widen.
+    </div>
+  </section>
+
+
+  <!-- 12. Coding workload -->
+  <section class="section" id="coding">
+    <h2>12. Coding Workloads, Measured Clean <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Everything above is summarization. That matters because speculative decoding&rsquo;s speed is a function of <em>draft acceptance</em> &mdash; how predictable the next tokens are &mdash; and prose summarization is a hard draft target. This section runs an 11-cell suite of coding tasks built from real files on this machine, against three configs, <strong>single-tenant with the other GPU idle</strong>. 256-token greedy completions, prompt caching off, 250 W cap, acceptance read from each server&rsquo;s own counters.</p>
+
+    <div class="box">
+      <strong>Coding is ~1.4&times; summarization, and the two vLLM speculators are tied.</strong> Averaged over the coding classes: vLLM MTP k=4 <strong>144.0 tok/s</strong>, vLLM DFlash2 k=7 <strong>143.0</strong>, llama.cpp 2-GPU MTP <strong>55.6</strong>. MTP takes 6 of 11 cells and DFlash2 5 &mdash; a statistical tie, so there is no case for switching away from MTP, which is already the default. Peak observed: <strong>181.5 tok/s</strong> (DFlash2, repo edit at 1K context).
+    </div>
+
+    <h3>Decode tok/s by task class</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>Task class</th><th>Context</th><th>vLLM MTP k=4</th><th>vLLM DFlash2 k=7</th><th>llama.cpp 2-GPU</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Canonical</strong><span class="sub">Chudnovsky &pi;</span></td><td class="n">55</td><td class="n">144.3<span class="sub">61% acc</span></td><td class="n">135.6<span class="sub">42%</span></td><td class="n">63.3<span class="sub">1.93 tok/step</span></td></tr>
+          <tr><td><strong>Boilerplate</strong><span class="sub">argparse CLI</span></td><td class="n">64</td><td class="n">152.1<span class="sub">67%</span></td><td class="n">160.9<span class="sub">59%</span></td><td class="n">63.8<span class="sub">1.95</span></td></tr>
+          <tr><td rowspan="3"><strong>Repo edit</strong><span class="sub">real source + &ldquo;add --dry-run, show diff&rdquo;</span></td><td class="n">1,007</td><td class="n">169.7<span class="sub">78%</span></td><td class="n"><strong>181.5</strong><span class="sub">70%</span></td><td class="n">64.2<span class="sub">1.98</span></td></tr>
+          <tr><td class="n">8,281</td><td class="n">159.6<span class="sub">78%</span></td><td class="n">109.9<span class="sub">46%</span></td><td class="n">60.6<span class="sub">1.98</span></td></tr>
+          <tr><td class="n">32,463</td><td class="n">136.2<span class="sub">81%</span></td><td class="n">120.3<span class="sub">51%</span></td><td class="n">47.8<span class="sub">2.00</span></td></tr>
+          <tr><td rowspan="3"><strong>Code review</strong><span class="sub">same files, &ldquo;find bugs&rdquo;</span></td><td class="n">987</td><td class="n">121.0<span class="sub">56%</span></td><td class="n">144.3<span class="sub">50%</span></td><td class="n">59.1<span class="sub">1.88</span></td></tr>
+          <tr><td class="n">8,280</td><td class="n">138.4<span class="sub">71%</span></td><td class="n">132.5<span class="sub">46%</span></td><td class="n">47.8<span class="sub">1.90</span></td></tr>
+          <tr><td class="n">32,457</td><td class="n">131.0<span class="sub">76%</span></td><td class="n">158.8<span class="sub">62%</span></td><td class="n">38.4<span class="sub">1.88</span></td></tr>
+          <tr><td rowspan="3"><strong>Summarize</strong><span class="sub">&sect;11&rsquo;s task, verbatim</span></td><td class="n">1,042</td><td class="n">117.0<span class="sub">54%</span></td><td class="n">126.2<span class="sub">39%</span></td><td class="n">54.9<span class="sub">1.86</span></td></tr>
+          <tr><td class="n">8,075</td><td class="n">110.3<span class="sub">52%</span></td><td class="n">99.6<span class="sub">29%</span></td><td class="n">43.7<span class="sub">1.79</span></td></tr>
+          <tr><td class="n">31,833</td><td class="n">88.5<span class="sub">44%</span></td><td class="n">82.1<span class="sub">26%</span></td><td class="n">34.6<span class="sub">1.81</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Acceptance percentages are only comparable <em>within</em> an engine: llama.cpp reads 88&ndash;100% but at n=1 its ceiling is 2.0 tokens per step, so the honest cross-engine metric is tokens/step &mdash; vLLM 2.8&ndash;5.9 against llama.cpp&rsquo;s 1.8&ndash;2.0. That gap, not the acceptance rate, is why llama.cpp runs at a third of vLLM&rsquo;s speed here.</p>
+
+    <h3>Why k=4 beats k=7 &mdash; and when it doesn&rsquo;t</h3>
+    <div class="viz-block">
+      <figure class="fig"><figcaption>Draft acceptance by position &mdash; code vs prose</figcaption><svg class="chart" viewBox="0 0 760 300" role="img" aria-labelledby="pos-t" data-chart="pos">
+<title id="pos-t">Draft acceptance by draft position, code vs prose</title>
+<line class="grid" x1="52" x2="550" y1="258.0" y2="258.0"/>
+<text class="tick" x="44" y="262.0" text-anchor="end">0%</text>
+<line class="grid" x1="52" x2="550" y1="197.5" y2="197.5"/>
+<text class="tick" x="44" y="201.5" text-anchor="end">25%</text>
+<line class="grid" x1="52" x2="550" y1="137.0" y2="137.0"/>
+<text class="tick" x="44" y="141.0" text-anchor="end">50%</text>
+<line class="grid" x1="52" x2="550" y1="76.5" y2="76.5"/>
+<text class="tick" x="44" y="80.5" text-anchor="end">75%</text>
+<line class="grid" x1="52" x2="550" y1="16.0" y2="16.0"/>
+<text class="tick" x="44" y="20.0" text-anchor="end">100%</text>
+<text class="tick" x="52.0" y="276" text-anchor="middle">0</text>
+<text class="tick" x="135.0" y="276" text-anchor="middle">1</text>
+<text class="tick" x="218.0" y="276" text-anchor="middle">2</text>
+<text class="tick" x="301.0" y="276" text-anchor="middle">3</text>
+<text class="tick" x="384.0" y="276" text-anchor="middle">4</text>
+<text class="tick" x="467.0" y="276" text-anchor="middle">5</text>
+<text class="tick" x="550.0" y="276" text-anchor="middle">6</text>
+<line class="axis" x1="52" x2="550" y1="258.0" y2="258.0"/>
+<text class="axlbl" x="301" y="294" text-anchor="middle">draft position (0 = first speculated token)</text>
+<path class="ln s1" d="M52.0,40.2 L135.0,62.0 L218.0,81.3 L301.0,91.0"/>
+<circle class="pt s1" cx="52.0" cy="40.2" r="4"/>
+<circle class="pt s1" cx="135.0" cy="62.0" r="4"/>
+<circle class="pt s1" cx="218.0" cy="81.3" r="4"/>
+<circle class="pt s1" cx="301.0" cy="91.0" r="4"/>
+<path class="ln s2" d="M52.0,64.4 L135.0,103.1 L218.0,158.8 L301.0,185.4"/>
+<circle class="pt s2" cx="52.0" cy="64.4" r="4"/>
+<circle class="pt s2" cx="135.0" cy="103.1" r="4"/>
+<circle class="pt s2" cx="218.0" cy="158.8" r="4"/>
+<circle class="pt s2" cx="301.0" cy="185.4" r="4"/>
+<path class="ln s3" d="M52.0,54.7 L135.0,59.6 L218.0,81.3 L301.0,86.2 L384.0,98.3 L467.0,115.2 L550.0,124.9"/>
+<circle class="pt s3" cx="52.0" cy="54.7" r="4"/>
+<circle class="pt s3" cx="135.0" cy="59.6" r="4"/>
+<circle class="pt s3" cx="218.0" cy="81.3" r="4"/>
+<circle class="pt s3" cx="301.0" cy="86.2" r="4"/>
+<circle class="pt s3" cx="384.0" cy="98.3" r="4"/>
+<circle class="pt s3" cx="467.0" cy="115.2" r="4"/>
+<circle class="pt s3" cx="550.0" cy="124.9" r="4"/>
+<path class="ln s4" d="M52.0,76.5 L135.0,115.2 L218.0,151.5 L301.0,166.0 L384.0,197.5 L467.0,209.6 L550.0,229.0"/>
+<circle class="pt s4" cx="52.0" cy="76.5" r="4"/>
+<circle class="pt s4" cx="135.0" cy="115.2" r="4"/>
+<circle class="pt s4" cx="218.0" cy="151.5" r="4"/>
+<circle class="pt s4" cx="301.0" cy="166.0" r="4"/>
+<circle class="pt s4" cx="384.0" cy="197.5" r="4"/>
+<circle class="pt s4" cx="467.0" cy="209.6" r="4"/>
+<circle class="pt s4" cx="550.0" cy="229.0" r="4"/>
+<line class="key s1" x1="560" x2="572" y1="91.0" y2="91.0"/>
+<text class="endlbl" x="576" y="95.0"><tspan class="val">69%</tspan> <tspan class="nm">MTP k=4 · repo edit (code)</tspan></text>
+<line class="key s3" x1="560" x2="572" y1="124.9" y2="124.9"/>
+<text class="endlbl" x="576" y="128.9"><tspan class="val">55%</tspan> <tspan class="nm">DFlash2 k=7 · repo edit (code)</tspan></text>
+<line class="key s2" x1="560" x2="572" y1="185.4" y2="185.4"/>
+<text class="endlbl" x="576" y="189.4"><tspan class="val">30%</tspan> <tspan class="nm">MTP k=4 · summarize (prose)</tspan></text>
+<line class="key s4" x1="560" x2="572" y1="229.0" y2="229.0"/>
+<text class="endlbl" x="576" y="233.0"><tspan class="val">12%</tspan> <tspan class="nm">DFlash2 k=7 · summarize (prose)</tspan></text>
+</svg></figure>
+    </div>
+    <p class="section-note">Each speculated token is conditioned on the ones before it, so acceptance falls with draft depth. The rate of that fall is what decides the optimal draft count &mdash; and it is <strong>task-dependent, not a property of the hardware</strong>. On a repo edit, DFlash2 still lands 55% of its seventh draft token, so deep drafting pays. On prose the same speculator collapses to 12%, meaning positions 5&ndash;7 are verify compute spent on tokens that will be thrown away. This is the mechanism behind every k-sweep in this document, including the earlier finding that n=4 beat the model card&rsquo;s recommended n=7 &mdash; that sweep was run on prose.</p>
+
+    <div class="box">
+      <strong>Two predictions the data killed.</strong> Computing &pi; was supposed to be the memorized ceiling; it is the <em>floor</em> of the coding classes (61% acceptance, 144 tok/s), because Chudnovsky is dense numeric code rather than stereotyped boilerplate &mdash; a &pi;-based benchmark would have understated coding by about 20%. And repo edits were predicted to sit mid-range on unfamiliar identifiers; they are the <em>highest</em> (78&ndash;81%), because emitting a diff means reproducing code that is already in the context. Acceptance there <em>rises</em> with context length, since more surrounding code makes the edit more determined.
+    </div>
+
+    <div class="box">
+      <strong>Unresolved.</strong> llama.cpp 2-GPU is the one config measured cleanly in both rounds, and it reports 45.5 tok/s at 32K in &sect;11 against 34.6 here on the nominally identical summarization task. Contention does not explain it &mdash; both runs owned the machine. The likely cause is that the two harnesses build the prompt from different source text, which changes acceptance; it has not been isolated. Treat the two rounds as separate experiments rather than a controlled comparison.
+    </div>
+  </section>
+
+
+  <!-- 13. Agentic profile -->
+  <section class="section" id="agentic">
+    <h2>13. Multi-Turn Agentic Profile <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Every measurement above is single-turn against a clean context. Real agentic coding is not: context accumulates across turns of tool calls, file reads and edits. To reach that regime we pointed the <a href="https://pi.dev">Pi coding agent</a> (v0.84.3, MIT) at a single pinned replica and had Qwen3.8-27B <strong>build Tetris from scratch</strong> &mdash; core loop, then hold-piece, SRS wall kicks, scoring &mdash; each feature requiring it to re-read and extend its own earlier code. 68 assistant turns, context growing 5.4K &rarr; 61.5K against a 65,536 ceiling. Decode rate and TTFT come from stamping pi&rsquo;s streaming JSON deltas on arrival; acceptance from the replica&rsquo;s own spec-decode counters over the same windows.</p>
+
+    <div class="box">
+      <strong>The prediction was wrong: acceptance does not decay with context.</strong> We expected the 78&ndash;81% single-turn repo-edit acceptance to collapse by turn 8 with 40K of history, on the reasoning that later turns are novel reasoning rather than reproducing context. It doesn&rsquo;t. Acceptance is <strong>flat &mdash; &minus;0.03 points per 1K tokens, r=&minus;0.05</strong>. It in fact <em>rises</em> from 65% to 77% through the first 30K, then settles around 69%, within a few points of the single-turn baseline.
+    </div>
+
+    <div class="viz-block">
+      <figure class="fig"><figcaption>Indexed to the first context band (=100) &mdash; three measures, one axis</figcaption><svg class="chart" viewBox="0 0 760 320" role="img" aria-labelledby="idx-t" data-chart="idx">
+<title id="idx-t">Acceptance, decode rate and TTFT vs accumulated context, indexed to the first band</title>
+<line class="grid" x1="58" x2="570" y1="276.0" y2="276.0"/>
+<text class="tick" x="50" y="280.0" text-anchor="end">0</text>
+<line class="grid" x1="58" x2="570" y1="229.7" y2="229.7"/>
+<text class="tick" x="50" y="233.7" text-anchor="end">200</text>
+<line class="grid" x1="58" x2="570" y1="183.3" y2="183.3"/>
+<text class="tick" x="50" y="187.3" text-anchor="end">400</text>
+<line class="grid" x1="58" x2="570" y1="137.0" y2="137.0"/>
+<text class="tick" x="50" y="141.0" text-anchor="end">600</text>
+<line class="grid" x1="58" x2="570" y1="90.6" y2="90.6"/>
+<text class="tick" x="50" y="94.6" text-anchor="end">800</text>
+<line class="grid" x1="58" x2="570" y1="44.3" y2="44.3"/>
+<text class="tick" x="50" y="48.3" text-anchor="end">1,000</text>
+<text class="tick" x="58.0" y="294" text-anchor="middle">5K</text>
+<text class="tick" x="151.1" y="294" text-anchor="middle">15K</text>
+<text class="tick" x="244.2" y="294" text-anchor="middle">25K</text>
+<text class="tick" x="337.3" y="294" text-anchor="middle">35K</text>
+<text class="tick" x="430.4" y="294" text-anchor="middle">45K</text>
+<text class="tick" x="570.0" y="294" text-anchor="middle">60K</text>
+<line class="axis" x1="58" x2="570" y1="276.0" y2="276.0"/>
+<line class="grid" x1="58" x2="570" y1="252.8" y2="252.8" stroke-dasharray="0"/>
+<text class="axlbl" x="314" y="314" text-anchor="middle">accumulated context (band midpoint)</text>
+<path class="ln s1" d="M58.0,252.8 L151.1,250.0 L244.2,248.6 L337.3,250.3 L430.4,251.5 L570.0,251.7"/>
+<circle class="pt s1" cx="58.0" cy="252.8" r="4"/>
+<circle class="pt s1" cx="151.1" cy="250.0" r="4"/>
+<circle class="pt s1" cx="244.2" cy="248.6" r="4"/>
+<circle class="pt s1" cx="337.3" cy="250.3" r="4"/>
+<circle class="pt s1" cx="430.4" cy="251.5" r="4"/>
+<circle class="pt s1" cx="570.0" cy="251.7" r="4"/>
+<path class="ln s2" d="M58.0,252.8 L151.1,252.2 L244.2,252.8 L337.3,255.0 L430.4,256.8 L570.0,257.7"/>
+<circle class="pt s2" cx="58.0" cy="252.8" r="4"/>
+<circle class="pt s2" cx="151.1" cy="252.2" r="4"/>
+<circle class="pt s2" cx="244.2" cy="252.8" r="4"/>
+<circle class="pt s2" cx="337.3" cy="255.0" r="4"/>
+<circle class="pt s2" cx="430.4" cy="256.8" r="4"/>
+<circle class="pt s2" cx="570.0" cy="257.7" r="4"/>
+<path class="ln s4" d="M58.0,252.8 L151.1,226.9 L244.2,188.8 L337.3,146.0 L430.4,85.1 L570.0,35.3"/>
+<circle class="pt s4" cx="58.0" cy="252.8" r="4"/>
+<circle class="pt s4" cx="151.1" cy="226.9" r="4"/>
+<circle class="pt s4" cx="244.2" cy="188.8" r="4"/>
+<circle class="pt s4" cx="337.3" cy="146.0" r="4"/>
+<circle class="pt s4" cx="430.4" cy="85.1" r="4"/>
+<circle class="pt s4" cx="570.0" cy="35.3" r="4"/>
+<line class="key s4" x1="580" x2="592" y1="35.3" y2="35.3"/>
+<text class="endlbl" x="596" y="39.3"><tspan class="val">1,039</tspan> <tspan class="nm">Time to first token</tspan></text>
+<line class="key s1" x1="580" x2="592" y1="251.7" y2="251.7"/>
+<text class="endlbl" x="596" y="255.7"><tspan class="val">105</tspan> <tspan class="nm">Draft acceptance</tspan></text>
+<line class="leader" x1="576.0" y1="257.7" x2="578" y2="266.7"/>
+<line class="key s2" x1="580" x2="592" y1="266.7" y2="266.7"/>
+<text class="endlbl" x="596" y="270.7"><tspan class="val">79</tspan> <tspan class="nm">Decode tok/s</tspan></text>
+</svg></figure>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Context band</th><th>Turns</th><th>Acceptance</th><th>Decode tok/s</th><th>TTFT</th><th>Tokens/step</th><th>Acceptance by position 0&ndash;3</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">0&ndash;10K</td><td class="n">7</td><td class="n">65.3%</td><td class="n">137.3</td><td class="n">5.9 s</td><td class="n">3.61</td><td class="mono">0.86 0.71 0.57 0.47</td></tr>
+          <tr><td class="mono">10&ndash;20K</td><td class="n">11</td><td class="n">73.3%</td><td class="n">140.8</td><td class="n">12.5 s</td><td class="n">3.93</td><td class="mono">0.90 0.79 0.67 0.58</td></tr>
+          <tr><td class="mono">20&ndash;30K</td><td class="n">5</td><td class="n"><strong>77.3%</strong></td><td class="n">137.2</td><td class="n">22.2 s</td><td class="n">4.09</td><td class="mono">0.89 0.81 0.73 0.66</td></tr>
+          <tr><td class="mono">30&ndash;40K</td><td class="n">7</td><td class="n">72.3%</td><td class="n">124.6</td><td class="n">33.1 s</td><td class="n">3.89</td><td class="mono">0.88 0.77 0.67 0.58</td></tr>
+          <tr><td class="mono">40&ndash;50K</td><td class="n">16</td><td class="n">69.1%</td><td class="n">113.8</td><td class="n">48.6 s</td><td class="n">3.76</td><td class="mono">0.86 0.74 0.63 0.53</td></tr>
+          <tr><td class="mono">50&ndash;70K</td><td class="n">8</td><td class="n">68.5%</td><td class="n">108.5</td><td class="n">61.3 s</td><td class="n">3.74</td><td class="mono">0.85 0.73 0.63 0.53</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>What actually degrades is attention, not speculation.</strong> Decode rate falls <strong>&minus;0.70 tok/s per 1K tokens (r=&minus;0.70)</strong> &mdash; 137 &rarr; 108, about &minus;21% across the run. With acceptance flat, that cost is the growing KV cache, not the drafter losing its grip. The practical consequence: <em>reducing draft depth would not help here.</em> A slowdown caused by attention looks identical to one caused by speculation if you only watch tok/s, and the two call for opposite fixes.
+    </div>
+
+    <div class="box">
+      <strong>Prefill is the real tax, and it is brutally linear:</strong> <strong>+1.14 s per 1K tokens, r=+1.00</strong>. At 61K context a request waits <strong>69 seconds</strong> before its first token &mdash; roughly six times the entire decode time of a 500-token reply. For agentic work at depth the speculator is close to irrelevant and prefix caching is the lever that matters. It was disabled here for measurement; the upstream repo reports a 24K document dropping from ~23 s to ~1 s on the second turn.
+    </div>
+
+    <p class="section-note"><strong>Compaction bought nothing.</strong> Pi compacted at turn 52, cutting context 61.5K &rarr; 30.4K. The twelve turns before averaged 70.8% acceptance and 113.1 tok/s; after, 67.4% and 112.2. Freeing context did not restore speed &mdash; exactly what you would predict if acceptance was never context-limited to begin with, and a useful independent check on the headline result.</p>
+
+    <p class="section-note"><strong>The build worked.</strong> 618 lines of Python: curses rendering, SRS wall kicks, hold-piece, a 7-bag queue. It parses and imports cleanly. The ladder reached 4 of 11 planned steps before a turn hit the 900 s timeout &mdash; the agent proved far more iterative than designed for, spending 30 assistant messages on step one alone. That is a limitation of the ladder, not of the model: context still reached 61.5K, past the 58K target.</p>
+
+    <div class="box">
+      <strong>Two instrumentation traps worth repeating.</strong> Pi&rsquo;s session files record ISO-8601 <em>completion</em> timestamps only, so token-count &divide; timestamp-delta yields end-to-end throughput with prefill baked in &mdash; 37&ndash;49 tok/s against a true decode rate near 144. Anything derived from session files alone understates decode by roughly threefold. Separately, <code>--thinking off</code> was a <em>silent no-op</em>: declaring the model <code>reasoning: false</code> made the agent skip its thinking branch entirely and send no <code>chat_template_kwargs</code>, so the server&rsquo;s own default (thinking on) applied and reasoning tokens inflated every count. Both failures are silent and neither raises an error.
+    </div>
+  </section>
+
+
+  <!-- 14. Cross-check -->
+  <section class="section" id="crosscheck">
+    <h2>14. Independent Cross-Check <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Section 13&rsquo;s flat-acceptance result contradicted our own prediction, which is exactly when a finding deserves a second instrument. We repeated the Tetris ladder with <a href="https://github.com/QwenLM/qwen-code">Qwen Code</a> v0.22.1 &mdash; a different codebase, a different prompt construction, and the Qwen-native XML tool-call format rather than Pi&rsquo;s. The <code>/metrics</code> acceptance join is harness-agnostic and carried over untouched.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Harness</th><th>Mean acceptance</th><th>Acceptance slope</th><th>r</th><th>Decode slope</th><th>Context span</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Pi</strong> (baseline)</td><td class="n">~70%</td><td class="n">&minus;0.006 pts/1K</td><td class="n">&minus;0.01</td><td class="n">&minus;0.571 tok/s/1K</td><td class="n">5&ndash;61K</td></tr>
+          <tr><td><strong>Qwen Code</strong> (cross-check)</td><td class="n">76.1%</td><td class="n">&minus;0.063 pts/1K</td><td class="n">&minus;0.03</td><td class="n">&minus;0.593 tok/s/1K</td><td class="n">21&ndash;37K</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Confirmed &mdash; the finding is about the model, not the scaffold.</strong> Two harnesses with nothing in common but the endpoint agree that acceptance is flat against context and that decode decays at essentially the same rate. Qwen Code&rsquo;s narrower context span (21&ndash;37K) gives it less leverage on the trend, so treat it as corroboration rather than a replacement for the Pi run.
+    </div>
+
+    <p class="section-note"><strong>Two corrections were needed before the comparison meant anything.</strong> The raw aggregate read 93.7% acceptance against Pi&rsquo;s 70% &mdash; because templated tool-call messages, which stream as a <em>single</em> delta and are trivially predictable, were pooled with real generation. Separated: real generation 74.5%, tool calls 94.0%. Worse, the rows carrying context and the rows carrying streaming deltas were <strong>disjoint</strong> &mdash; the join silently never happened, so the first fit was computed entirely on tool-call messages. Merging by adjacency yields the 33 properly paired rows above. Neither fault raised an error; both produced plausible-looking numbers.</p>
+  </section>
+
+  <!-- 15. Correctness -->
+  <section class="section" id="correctness">
+    <h2>15. Correctness &mdash; Aider Polyglot <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Every section before this measures speed. Speed is only half the question, and speculative decoding cannot answer the other half &mdash; it is mathematically exact, so a speculator can never change what the model would have said. Any quality difference must come from the quantization or the KV dtype. This is the first correctness measurement on this stack: <strong>224 of 225 Exercism exercises</strong> across six languages, two attempts with test feedback after a failure, <code>diff</code> edit format, four threads across both replicas, ~2 h wall.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="v">12.5<small>%</small></div><div class="l">solved first attempt</div></div>
+      <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">solved after test feedback</div></div>
+      <div class="stat"><div class="v">90.6<small>%</small></div><div class="l">well-formed edit blocks</div></div>
+      <div class="stat"><div class="v">97<small>s</small></div><div class="l">per case</div></div>
+    </div>
+
+    <div class="viz-block">
+      <figure class="fig"><figcaption>Pass rate by language &mdash; cold vs with test feedback</figcaption><svg class="chart" viewBox="0 0 760 300" role="img" aria-labelledby="aid-t" data-chart="aider">
+<title id="aid-t">Aider polyglot pass rate by language, first attempt vs after test feedback</title>
+<line class="grid" x1="86" x2="610" y1="254.0" y2="254.0"/>
+<text class="tick" x="78" y="258.0" text-anchor="end">0%</text>
+<line class="grid" x1="86" x2="610" y1="220.0" y2="220.0"/>
+<text class="tick" x="78" y="224.0" text-anchor="end">10%</text>
+<line class="grid" x1="86" x2="610" y1="186.0" y2="186.0"/>
+<text class="tick" x="78" y="190.0" text-anchor="end">20%</text>
+<line class="grid" x1="86" x2="610" y1="152.0" y2="152.0"/>
+<text class="tick" x="78" y="156.0" text-anchor="end">30%</text>
+<line class="grid" x1="86" x2="610" y1="118.0" y2="118.0"/>
+<text class="tick" x="78" y="122.0" text-anchor="end">40%</text>
+<line class="grid" x1="86" x2="610" y1="84.0" y2="84.0"/>
+<text class="tick" x="78" y="88.0" text-anchor="end">50%</text>
+<line class="grid" x1="86" x2="610" y1="50.0" y2="50.0"/>
+<text class="tick" x="78" y="54.0" text-anchor="end">60%</text>
+<line class="grid" x1="86" x2="610" y1="16.0" y2="16.0"/>
+<text class="tick" x="78" y="20.0" text-anchor="end">70%</text>
+<line class="axis" x1="86" x2="610" y1="254.0" y2="254.0"/>
+<path class="bar s2" d="M108.7,254.0 L108.7,178.1 Q108.7,174.1 112.7,174.1 L124.7,174.1 Q128.7,174.1 128.7,178.1 L128.7,254.0 Z"/>
+<path class="bar s1" d="M130.7,254.0 L130.7,58.1 Q130.7,54.1 134.7,54.1 L146.7,54.1 Q150.7,54.1 150.7,58.1 L150.7,254.0 Z"/>
+<text class="tick" x="129.7" y="272" text-anchor="middle">python</text>
+<text class="tick" x="129.7" y="285" text-anchor="middle" opacity="0.65">n=34</text>
+<text class="barlbl" x="140.7" y="48.1" text-anchor="middle">59</text>
+<path class="bar s2" d="M196.0,254.0 L196.0,245.1 Q196.0,241.1 200.0,241.1 L212.0,241.1 Q216.0,241.1 216.0,245.1 L216.0,254.0 Z"/>
+<path class="bar s1" d="M218.0,254.0 L218.0,61.8 Q218.0,57.8 222.0,57.8 L234.0,57.8 Q238.0,57.8 238.0,61.8 L238.0,254.0 Z"/>
+<text class="tick" x="217.0" y="272" text-anchor="middle">cpp</text>
+<text class="tick" x="217.0" y="285" text-anchor="middle" opacity="0.65">n=26</text>
+<text class="barlbl" x="228.0" y="51.8" text-anchor="middle">58</text>
+<path class="bar s2" d="M283.3,254.0 L283.3,202.6 Q283.3,198.6 287.3,198.6 L299.3,198.6 Q303.3,198.6 303.3,202.6 L303.3,254.0 Z"/>
+<path class="bar s1" d="M305.3,254.0 L305.3,70.7 Q305.3,66.7 309.3,66.7 L321.3,66.7 Q325.3,66.7 325.3,70.7 L325.3,254.0 Z"/>
+<text class="tick" x="304.3" y="272" text-anchor="middle">javascript</text>
+<text class="tick" x="304.3" y="285" text-anchor="middle" opacity="0.65">n=49</text>
+<text class="barlbl" x="315.3" y="60.7" text-anchor="middle">55</text>
+<path class="bar s2" d="M370.7,254.0 L370.7,236.2 Q370.7,232.2 374.7,232.2 L386.7,232.2 Q390.7,232.2 390.7,236.2 L390.7,254.0 Z"/>
+<path class="bar s1" d="M392.7,254.0 L392.7,98.9 Q392.7,94.9 396.7,94.9 L408.7,94.9 Q412.7,94.9 412.7,98.9 L412.7,254.0 Z"/>
+<text class="tick" x="391.7" y="272" text-anchor="middle">java</text>
+<text class="tick" x="391.7" y="285" text-anchor="middle" opacity="0.65">n=47</text>
+<text class="barlbl" x="402.7" y="88.9" text-anchor="middle">47</text>
+<path class="bar s2" d="M458.0,254.0 L458.0,195.4 Q458.0,191.4 462.0,191.4 L474.0,191.4 Q478.0,191.4 478.0,195.4 L478.0,254.0 Z"/>
+<path class="bar s1" d="M480.0,254.0 L480.0,106.0 Q480.0,102.0 484.0,102.0 L496.0,102.0 Q500.0,102.0 500.0,106.0 L500.0,254.0 Z"/>
+<text class="tick" x="479.0" y="272" text-anchor="middle">go</text>
+<text class="tick" x="479.0" y="285" text-anchor="middle" opacity="0.65">n=38</text>
+<text class="barlbl" x="490.0" y="96.0" text-anchor="middle">45</text>
+<path class="bar s2" d="M545.3,254.0 L545.3,246.8 Q545.3,242.8 549.3,242.8 L561.3,242.8 Q565.3,242.8 565.3,246.8 L565.3,254.0 Z"/>
+<path class="bar s1" d="M567.3,254.0 L567.3,167.2 Q567.3,163.2 571.3,163.2 L583.3,163.2 Q587.3,163.2 587.3,167.2 L587.3,254.0 Z"/>
+<text class="tick" x="566.3" y="272" text-anchor="middle">rust</text>
+<text class="tick" x="566.3" y="285" text-anchor="middle" opacity="0.65">n=30</text>
+<text class="barlbl" x="577.3" y="157.2" text-anchor="middle">27</text>
+<line class="key s2" x1="620" x2="632" y1="36" y2="36"/>
+<text class="endlbl" x="636" y="40">first attempt</text>
+<line class="key s1" x1="620" x2="632" y1="56" y2="56"/>
+<text class="endlbl" x="636" y="60">after test feedback</text>
+</svg></figure>
+    </div>
+
+    <div class="box">
+      <strong>The headline is the gap, not the score.</strong> 28 exercises were solved cold; 81 more were solved only after the model saw failing test output &mdash; a <strong>3.9&times; improvement from feedback alone</strong>. That is the most actionable result in this document: for agentic use, plumbing test output back to the model matters more than any serving-configuration choice measured here. It also coheres with &sect;12, where repo-edit tasks &mdash; reproducing code already in context &mdash; showed the highest draft acceptance at 78&ndash;81%.
+    </div>
+
+    <p class="section-note"><strong>Rust is the clear weak spot</strong> at 26.7%, less than half of Python&rsquo;s rate, and it is weak cold as well (3.3% first attempt). C++ shows the opposite profile &mdash; near-worst cold at 3.8% but second-best with feedback at 57.7% &mdash; and it is also where most malformed edit blocks concentrated.</p>
+
+    <h3>Edit format was settled by measurement, not assumption</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Format</th><th>pass_1</th><th>pass_2</th><th>Well-formed</th><th>s/case</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">whole</td><td class="n">0.0%</td><td class="n">40.0%</td><td class="n">100%</td><td class="n">88.9</td></tr>
+          <tr><td class="mono"><strong>diff</strong></td><td class="n"><strong>20.0%</strong></td><td class="n"><strong>50.0%</strong></td><td class="n">80.0%</td><td class="n">121.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">On a 10-exercise smoke test, <code>diff</code> won both pass rates despite <code>whole</code> being perfectly well-formed &mdash; and <code>whole</code> bypasses the malformed-edit check that the benchmark partly exists to apply. The pass_2 gap is a single case at n=10; the pass_1 gap is the stronger signal. <code>diff</code> also matches Aider&rsquo;s own shipped setting for every Qwen coder model.</p>
+
+    <div class="box">
+      <strong>Infrastructure failures, separated from capability.</strong> Three cases (1.3%) failed for reasons that are not the model&rsquo;s fault: one context exhaustion, one test timeout, and one HTTP 413 &mdash; the last of which was <em>our</em> bug, an unset <code>client_max_body_size</code> leaving nginx at its 1 MB default and rejecting large prompts before they ever reached vLLM. Now set to 32 m and verified. The remaining 24 malformed responses across 21 cases are genuine <code>diff</code>-format capability misses. Conflating the two categories would have overstated failure by roughly a quarter.
+    </div>
+
+    <div class="box" style="border-left-color: var(--stop); background: var(--stop-bg);">
+      <strong style="color: var(--stop);">Do not compare this 48.7% to a published leaderboard.</strong> It measures <em>this quantization</em> (<code>W4A16-AutoRound-fast</code>, int4-GPTQ lm_head) of Qwen3.8-27B, through <em>this</em> harness version, with thinking disabled, on <em>this</em> serving stack. It is not a measurement of the model&rsquo;s capability. A genuinely comparable number would require matching the reference harness, checkpoint precision and sampling settings &mdash; none of which we did, because the question here was how <em>our deployment</em> behaves.
+    </div>
+
+    <div class="box">
+      <strong>The trap that nearly invalidated the whole run.</strong> The first smoke test reported context exhaustion on 10 of 10 cases. Probing directly showed something stranger: <strong>24 of 24 requests generated their full token budget with completely empty <code>content</code></strong>. Thinking is on by default server-side, and this deployment runs <code>--reasoning-parser qwen3</code>, which extracts reasoning into a <em>separate</em> field &mdash; while Aider expects <code>&lt;think&gt;</code> inline in <code>content</code> and therefore saw nothing at all. Disabling it took errors from 10 to 0, seconds-per-case from 183.5 to 88.9, and cut tokens roughly fivefold for the same answer. This is the <strong>fourth</strong> time the same default silently corrupted a measurement in this project: it defeated Pi&rsquo;s <code>--thinking off</code>, needed a specific incantation in Qwen Code, and here produced a benchmark scoring a model whose output the harness could not read. It never raises an error.
+    </div>
+  </section>
+
+
+  <!-- 16. Negative result -->
+  <section class="section" id="quantblock">
+    <h2>16. A Comparison That Could Not Be Run <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">&sect;15 measured correctness for one quantization. The obvious follow-up &mdash; the same 225 exercises against a second 4-bit checkpoint, isolating quantization method at equal bit width &mdash; looked free: <code>cyankiwi/Qwen3.8-27B-AWQ-INT4</code> was already cached, no download required. It could not be run, and why it could not is more useful than the number would have been.</p>
+
+    <div class="box">
+      <strong>The predicted obstacle wasn&rsquo;t the real one.</strong> We expected the AWQ checkpoint to lack an MTP head, which would have confounded quantization with speculator presence. It ships 15 MTP tensors; that confound never existed. Two different problems did.
+    </div>
+
+    <h3>It is not one variable, it is five</h3>
+    <p class="section-note">The checkpoint is not classic AWQ at all &mdash; it is <code>compressed-tensors</code> / <code>pack-quantized</code>. Against the deployed checkpoint:</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Component</th><th>cyankiwi &ldquo;AWQ-INT4&rdquo;</th><th>AutoRound-fast (deployed)</th><th>Affects correctness?</th></tr></thead>
+        <tbody>
+          <tr><td>body weights</td><td class="mono">4-bit asymmetric, group-32</td><td class="mono">4-bit symmetric, group-128</td><td><span class="badge stop">yes</span></td></tr>
+          <tr><td><code>lm_head</code></td><td class="mono">BF16</td><td class="mono">int4</td><td><span class="badge stop">yes</span></td></tr>
+          <tr><td><code>embed_tokens</code></td><td class="mono">BF16</td><td class="mono">int8</td><td><span class="badge">marginal</span></td></tr>
+          <tr><td>MTP head</td><td class="mono">BF16</td><td class="mono">int4</td><td><span class="badge">no &mdash; speed only</span></td></tr>
+          <tr><td>draft vocabulary</td><td class="mono">none</td><td class="mono">40k tokens</td><td><span class="badge">no &mdash; speed only</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Three of those five were closed by running the serving stack&rsquo;s own prep on a copy (<code>quant_lm_head.py</code> rel. error 0.0064, <code>quant_embed.py</code> 0.0056, <code>quant_mtp.py</code> ~0.007), which would have left body quantization as the sole correctness-affecting variable. The clean experiment was within reach.</p>
+
+    <div class="box" style="border-left-color: var(--stop); background: var(--stop-bg);">
+      <strong style="color: var(--stop);">Then the stack structurally rejected it.</strong> Loading fails in <code>vocab_parallel_embedding.py</code> with <code>size of tensor a (160) must match tensor b (40)</code> &mdash; that is 5120/32 against 5120/128. The syv-ai <code>qwen3_5-embed-quant.patch</code> makes the embedding layer quantization-aware from the checkpoint&rsquo;s <em>declared</em> group size, while the same repo&rsquo;s requant scripts hard-code <code>GROUP = 128</code>. Restoring the original BF16 embedding shard and retrying reproduced the identical failure, ruling out the requant as the cause.
+    </div>
+
+    <div class="box">
+      <strong>The consequence for reusable benchmarking.</strong> This serving stack is <em>checkpoint-specific, not a general harness</em>. It assumes group-128 and patches vLLM&rsquo;s embedding path around that assumption, so any future checkpoint quantized at a different group size fails the same way &mdash; and fails as an opaque tensor-shape error at load rather than an honest &ldquo;unsupported quantization&rdquo;. A framework intended to evaluate <em>arbitrary</em> new models cannot use it as the serving layer. Either stock vLLM serves that role (at the cost of the syv-ai speed patches), or the prep must be rewritten to honour each checkpoint&rsquo;s declared group size.
+    </div>
+
+    <h3>A useful by-product: the noise floor</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Arm (identical checkpoint &amp; config)</th><th>Decode tok/s</th><th>TTFT</th><th>VRAM</th></tr></thead>
+        <tbody>
+          <tr><td>AutoRound-fast, GPU 0</td><td class="n">165.4</td><td class="n">0.96 s</td><td class="n">23,208 MiB</td></tr>
+          <tr><td>AutoRound-fast, GPU 1</td><td class="n">172.0</td><td class="n">0.91 s</td><td class="n">23,130 MiB</td></tr>
+          <tr><td>AutoRound-fast, GPU 0 after restart</td><td class="n">159.6</td><td class="n">1.00 s</td><td class="n">22,911 MiB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">The same card and configuration spans 165.4 &rarr; 159.6 tok/s across restarts. <strong>Single-stream differences below roughly 5% on this box are not meaningful.</strong> That threshold applies retroactively: the GPU 0 / GPU 1 gap reported earlier in this document reproduced here at ~4%, which sits at the edge of noise &mdash; treat it as suggestive rather than established.</p>
+  </section>
+
+
+  <!-- 17. Serving layer -->
+  <section class="section" id="servinglayer">
+    <h2>17. Choosing a Serving Layer for Comparison <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">&sect;16 established that the patched stack is checkpoint-specific and cannot serve a group-32 checkpoint. That is disqualifying for an instrument meant to evaluate <em>arbitrary</em> new models, so we retested the obvious alternative &mdash; stock <code>vllm/vllm-openai</code>, the same image that previously crashed this machine.</p>
+
+    <div class="box">
+      <strong>Stock vLLM serves what the patched stack cannot &mdash; and the crash did not recur.</strong> The historical failure sequence (CUDA-graph OOM &rarr; Triton GDN autotuner crash &rarr; Xid 79, GPU off the bus) was deliberately re-run. The OOM reproduced, being a genuine memory-accounting issue. The autotuner crash and the Xid <em>did not</em>, across roughly eight server starts. That is strong confirmation that <strong>Xid 79 was the 12 V brownout diagnosed earlier, not a software fault</strong>, and that the 250 W cap resolved it.
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Checkpoint</th><th>Quantization</th><th>Patched stack</th><th>Stock vLLM 0.27.1</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">dbirks/&hellip;AutoRound</td><td class="mono">4-bit symmetric, g128</td><td>serves</td><td>serves</td></tr>
+          <tr><td class="mono">cyankiwi/&hellip;AWQ-INT4</td><td class="mono">4-bit asymmetric, g32</td><td><span class="badge stop">fails at load</span></td><td><span class="badge">serves</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">The distinction is categorical, not marginal: where stock vLLM fails on the group-32 checkpoint it fails with <em>OOM</em>, a resource problem, never a shape error. It accepts the format; the patched stack structurally cannot.</p>
+
+    <h3>The first actual quantization comparison</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Checkpoint</th><th>Decode tok/s</th><th>Weights VRAM</th></tr></thead>
+        <tbody>
+          <tr><td>AutoRound (g128, symmetric)</td><td class="n">32.7</td><td class="n">17.45 GiB</td></tr>
+          <tr><td>AWQ (g32, asymmetric)</td><td class="n">32.9</td><td class="n">18.91 GiB</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Matched conditions &mdash; eager, no speculation, 4096 context. <strong>Indistinguishable:</strong> 0.6% apart, far inside the ~5% noise floor established in &sect;16. AWQ costs +1.46 GiB because its <code>lm_head</code> and MTP head remain BF16 where AutoRound-fast&rsquo;s are int4. This is speed only; a correctness comparison still needs the two-hour Aider run.</p>
+
+    <h3>What going stock costs</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Configuration</th><th>Decode tok/s</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr class="hl"><td><strong>Patched stack, MTP k=4</strong> (deployed)</td><td class="n"><strong>160&ndash;172</strong></td><td>split-KV verify attention, int4 lm_head, 40k draft vocab</td></tr>
+          <tr><td>Stock vLLM, MTP k=4</td><td class="n">71.8</td><td>61.3% acceptance, 3.45 tok/step &mdash; speculation works correctly</td></tr>
+          <tr><td>Stock vLLM, CUDA graphs, no spec</td><td class="n">39.6</td><td>graphs worth ~+20% over eager</td></tr>
+          <tr><td>Stock vLLM, eager, no spec</td><td class="n">32.7</td><td>baseline</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Two serving layers, two purposes.</strong> Stock vLLM is <strong>2.3&times; slower</strong> on the same checkpoint &mdash; the gap is entirely the missing syv-ai patches, not a defect. That cost is acceptable for <em>comparison</em>, because it applies uniformly: every model is measured on equal, unoptimized footing, so differences are attributable to the model rather than to how well one repository&rsquo;s patches happen to fit it. It is <em>not</em> acceptable for production, which is why the deployment stays patched. The serving stack is already one of the fairness fingerprint&rsquo;s eleven fields, so a comparison tool will refuse to mix them &mdash; but it bears saying plainly: <strong>framework numbers are comparison-grade, production numbers are not the same measurement.</strong> ~72 tok/s in a report card and ~165 tok/s in production describe the same model honestly under different instruments.
+    </div>
+
+    <h3>Two non-obvious requirements</h3>
+    <p class="section-note"><strong><code>gpu_memory_utilization</code> does not reserve for CUDA graph capture.</strong> At 0.93, vLLM consumed 22.99 GiB against a 22.1 GiB budget and then OOM&rsquo;d needing 784 MiB for graphs. Pin the KV pool explicitly with <code>--kv-cache-memory</code> instead of trusting the utilization fraction. <strong>And <code>max_num_seqs</code> is bounded by Mamba cache blocks</strong> &mdash; hybrid GDN models need one block per decode sequence, so pinning KV to 1.5 GiB left 31 blocks against a default of 256 and raised a hard <code>ValueError</code>. Both belong in a preflight check, not in a troubleshooting log.</p>
+
+    <div class="box">
+      <strong>One comparison remains blocked, for a new reason.</strong> AWQ with MTP speculation does not fit on a single 24 GB card &mdash; OOM by 2.37 GiB, because its BF16 <code>lm_head</code> and MTP head dwarf AutoRound-fast&rsquo;s int4 equivalents. A speculation-<em>on</em> comparison of these two checkpoints would require TP=2 for the AWQ arm alone, which changes the conditions and breaks the fairness contract. The speculation-off comparison above is clean; the speculation-on one cannot be made fair on this hardware.
+    </div>
+  </section>
+
+
+  <!-- 18. First report card -->
+  <section class="section" id="reportcard">
+    <h2>18. The Framework&rsquo;s First Report Card <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">Everything in &sect;&sect;10&ndash;17 was measured by hand-driven scripts. Those results are only reusable if the same measurements can be re-run on a new model without re-deriving the method each time, so they were consolidated into a benchmark framework: six axes, a declarative model config, and a machine-checked fairness contract. This is its first execution against live hardware &mdash; and the point of the exercise is not the numbers, which we already knew, but whether the instrument reproduces them.</p>
+
+    <div class="box">
+      <strong>It does. The correctness axis lands within noise of the hand-run reference.</strong> That axis had never executed end-to-end before: a mock endpoint could not reach it, because the Aider harness needs Docker and real code execution. Its results-directory globbing and score parsing ran for the first time here, against a known answer.
+    </div>
+
+    <h3>Framework output vs the hand-driven reference</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Measurement</th><th>Hand-run (&sect;15, &sect;11&ndash;12)</th><th>Framework card</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Aider pass_1</td><td class="n">12.5% (224 cases)</td><td class="n">14.7% (225)</td><td>+2.2 pt &mdash; ~5 cases</td></tr>
+          <tr><td>Aider pass_2</td><td class="n">48.7%</td><td class="n">49.8%</td><td>+1.1 pt &mdash; ~2 cases</td></tr>
+          <tr><td>Well-formed edits</td><td class="n">90.6%</td><td class="n">90.2%</td><td>&minus;0.4 pt</td></tr>
+          <tr class="hl"><td>TTFT slope</td><td class="n">+1.14 s/1K (r=1.00)</td><td class="n">+1.14 s/1K (r=1.00)</td><td><span class="badge">exact</span></td></tr>
+          <tr><td>Coding decode mean</td><td class="n">144.0 tok/s</td><td class="n">138.1 tok/s</td><td>&minus;4% &mdash; inside noise</td></tr>
+          <tr><td>Decode slope vs context</td><td class="n">&minus;0.70 tok/s/1K</td><td class="n">&minus;0.54 (r=&minus;0.91)</td><td>same sign, weaker</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">The TTFT slope reproducing to three significant figures across two independently written harnesses is the strongest single signal that the instrument measures what it claims to. Prefill cost is the least noisy thing on this box, so it makes a good calibration target.</p>
+
+    <h3>Full card &mdash; deployed stack, <code>core</code> tier</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Axis</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Speed</strong></td><td class="mono">coding 138.1 mean / 160.1 peak &middot; summarize 104.2 &middot; acceptance 65.3% &middot; 3.61 tok/step</td></tr>
+          <tr><td><strong>Throughput</strong></td><td class="mono">C1 123 &rarr; C16 402 &rarr; C32 404 (peak) &rarr; C64 402 agg tok/s</td></tr>
+          <tr><td><strong>Context</strong></td><td class="mono">57,349 served &middot; decode 119.6&rarr;84.8 &middot; TTFT 65.7 s at max</td></tr>
+          <tr><td><strong>Correctness</strong></td><td class="mono">225 scored &middot; pass_1 14.7% &middot; pass_2 49.8% &middot; 90.2% well-formed</td></tr>
+          <tr><td><strong>Efficiency</strong></td><td class="mono">0.514 tok/s/W single &middot; 1.504 batch &middot; 23,157 MiB peak</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Throughput saturates at C&asymp;32 (404 tok/s) and does not improve at C=64 &mdash; consistent with <code>MAX_SEQS=8</code> per replica across two replicas, so beyond ~16 concurrent requests the excess queues rather than adding throughput.</p>
+
+    <div class="box">
+      <strong>The instrument&rsquo;s resolution limit, quantified.</strong> The two runs used greedy decoding at temperature 0, which is nominally deterministic &mdash; yet Rust scored <strong>26.7% by hand and 40.0% through the framework</strong>, a four-case swing on n=30. The cause is the batch-shape nondeterminism established in &sect;10: at four concurrent threads, reduction order varies with batch composition and flips near-tie tokens. The practical consequence is that <strong>a single 225-case run resolves the aggregate to roughly &plusmn;2 points and per-language figures only to &plusmn;10</strong>. Per-language numbers should be read as indicative; a real per-language claim needs repeated runs, and any model-to-model difference smaller than a few points is not a difference.
+    </div>
+
+    <div class="box">
+      <strong>The fairness gate passed its live test</strong> &mdash; two cards of the same model on the same stack fingerprinted identically (<code>cdf5261e&hellip;</code>) and were correctly reported comparable. The negative path (differing conditions &rarr; refuse, exit 1) was proven earlier against mock cards, after that gate was found to be silently broken: it printed &ldquo;untrustworthy&rdquo;, then &ldquo;comparable&rdquo;, then exited 0. A stock-vLLM card would exercise the negative path on real data and has not yet been run.
+    </div>
+
+    <p class="section-note"><strong>Peak power reached 276.8 W against a 250 W cap.</strong> The cap governs sustained draw rather than instantaneous excursions, so this is expected &mdash; but it is worth recording given that uncapped transients were what took a GPU off the bus earlier in this project. No Xid events occurred during the run.</p>
+  </section>
+
+
+  <!-- 19. Reading these numbers -->
+  <section class="section" id="provenance">
+    <h2>19. Reading These Numbers</h2>
+    <p class="section-note">This document accumulated over five days, and its measurement conditions changed as we learned what mattered. Two tables in it can look directly comparable and not be. This section is the provenance key &mdash; the result of auditing every campaign&rsquo;s wall-clock window against every other, using server logs and sampler files to establish what was running when.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Condition</th><th>Changed when</th><th>Size of effect</th><th>Affects</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Cross-GPU contention</strong></td><td>Campaigns run in parallel on the two cards</td><td class="n">up to &minus;39%</td><td>&sect;11 (corrected), &sect;17 &ldquo;Beyond 64K&rdquo; rows, ~6% of &sect;10</td></tr>
+          <tr><td><strong>250 W power cap</strong></td><td>Applied Aug 22 after the Xid 79 fault</td><td class="n">~&minus;14%</td><td>Pre-cap: &sect;10&rsquo;s llama.cpp depth sweep and 350 W baselines. &sect;&sect;12&ndash;18 all post-cap</td></tr>
+          <tr><td><strong>Thinking enabled</strong></td><td>On by default until discovered in &sect;15</td><td class="n">~5&times; tokens</td><td>Every token count before &sect;15 is inflated</td></tr>
+          <tr><td><strong>Prompt corpus</strong></td><td>Random filler &rarr; real prose, mid-&sect;11</td><td class="n">large, on acceptance</td><td>Never compare across the change</td></tr>
+          <tr><td><strong>Prompt length</strong></td><td>Varies by campaign (46 tok &rarr; 192K)</td><td class="n">acceptance 0.61&rarr;0.78</td><td>The error that produced a wrong correction to &sect;10</td></tr>
+          <tr><td><strong>Pinned vs load-balanced</strong></td><td>Per campaign</td><td class="n">~4&ndash;6%</td><td>&sect;&sect;13&ndash;14, 17 pinned to the slower card; &sect;&sect;15, 18 balanced</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <strong>Which sections are clean.</strong> &sect;&sect;12, 13, 14, 15, 16, 18 are provably single-tenant. &sect;11 is contended and carries a correction banner. &sect;17&rsquo;s beyond-64K table inherits contended rows from &sect;11 and is annotated per row. &sect;10 is marginal &mdash; about 6% on one line, inside the noise floor.
+    </div>
+
+    <div class="box">
+      <strong>The general lesson, which cost us three separate errors to learn.</strong> Every one of these hazards produced numbers that looked entirely plausible. None raised an error. Contention did not announce itself; thinking-on returned <em>empty content</em> with a normal HTTP 200; comparing across prompt lengths yielded a confident 20% &ldquo;correction&rdquo; that was itself wrong. On a machine where a measurement can be quietly wrong in half a dozen ways, <strong>the conditions a number was taken under are part of the number</strong> &mdash; which is why the framework in &sect;18 hashes eleven of them into every result and refuses to compare across a mismatch. If you take one thing from this document for your own benchmarking, take that.
+    </div>
+  </section>
+
+
+  <!-- 20. Canonical numbers -->
+  <section class="section" id="canonical">
+    <h2>20. Canonical Numbers <span class="badge">THIS MACHINE</span></h2>
+    <p class="section-note">The definitive single-GPU figures, re-measured strictly single-tenant, one configuration at a time, <strong>mean of five</strong> with spreads. 512-token greedy completions, thinking disabled, 250 W cap. Where earlier sections and this one disagree, this section wins.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Configuration (single RTX 3090)</th><th>~1K prompt</th><th>~55 prompt</th><th>Acceptance</th><th>VRAM</th></tr></thead>
+        <tbody>
+          <tr class="hl"><td><strong>Patched vLLM + DFlash2 k=7</strong></td><td class="n"><strong>212.1</strong> &plusmn;1.2</td><td class="n">145.7</td><td class="n">0.661</td><td class="n">22.4 G</td></tr>
+          <tr><td><strong>Patched vLLM + MTP k=4</strong></td><td class="n">167.8 &plusmn;0.7</td><td class="n">129.8</td><td class="n">0.764</td><td class="n">22.7 G</td></tr>
+          <tr><td>Stock vLLM + MTP k=4</td><td class="n">85.6 &plusmn;0.8</td><td class="n">66.5</td><td class="n">0.901</td><td class="n">20.3 G</td></tr>
+          <tr><td>Patched batch profile, no spec</td><td class="n">43.1 &plusmn;0.7</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">23.3 G</td></tr>
+          <tr><td>llama.cpp + MTP n=1, tuned</td><td class="n">42.6 &plusmn;0.8</td><td class="n">40.6</td><td class="n">&mdash;</td><td class="n">16.9 G</td></tr>
+          <tr><td>Stock vLLM, no speculation</td><td class="n">32.8 &plusmn;0.1</td><td class="n">32.6</td><td class="n">&mdash;</td><td class="n">19.5 G</td></tr>
+          <tr><td><strong>llama.cpp, out-of-box defaults</strong></td><td class="n">27.6 &plusmn;0.6</td><td class="n">26.9</td><td class="n">&mdash;</td><td class="n">16.9 G</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">Spreads are <strong>0.1&ndash;2.0%</strong> &mdash; far tighter than the ~5% noise floor quoted elsewhere. That floor is a <em>restart</em> phenomenon, not run-to-run variance: repeated measurements against one live server agree closely, while a server restart shifts the whole set. Both facts matter, and they are not the same fact.</p>
+
+    <div class="box">
+      <strong>Prompt length affects speed only through acceptance &mdash; proven by control.</strong> Stock vLLM <em>without</em> speculation measures 32.6 tok/s at 55 tokens and 32.8 at 1K: a 0.6% difference, i.e. none. Turn speculation on and the same engine gains <strong>29%</strong>; the patched stack with DFlash2 gains <strong>46%</strong>, its acceptance climbing 0.420 &rarr; 0.661. A longer prefix of coherent context is simply easier to draft against. This is the mechanism behind every &ldquo;faster at longer context&rdquo; oddity in this document, and it is why comparing two speeds taken at different prompt lengths &mdash; an error made and corrected in &sect;10 &mdash; is meaningless without stating acceptance.
+    </div>
+
+    <h3>Throughput</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>Configuration</th><th>C=1</th><th>C=4</th><th>C=16</th><th>C=32</th><th>C=64</th></tr></thead>
+        <tbody>
+          <tr><td>Batch profile, one GPU</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">525.9</td><td class="n">761.8</td><td class="n"><strong>959.8</strong></td></tr>
+          <tr><td>Two replicas + load balancer</td><td class="n">151.1</td><td class="n">457.4</td><td class="n"><strong>905.6</strong></td><td class="n">&mdash;</td><td class="n">&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="section-note">One open discrepancy, stated rather than smoothed: <strong>DFlash2 at ~1K measures 212.1 here against &sect;12&rsquo;s 181.5, a 17% gap.</strong> Both runs were single-tenant and this one has a &plusmn;0.6% spread across five repeats. The cause is unidentified. The patched-versus-stock advantage is <strong>1.96&times;</strong> at both prompt lengths, revising the 2.3&times; quoted in &sect;17.</p>
+  </section><div class="foot">
+    <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
+    <p><sup class="fn">2</sup> Range spans baseline vLLM INT4 (~114, syv-ai) to llama.cpp Q4+MTP n=3 (~134&ndash;151, kgptalkie).</p>
+    <p><sup class="fn">3</sup> SGLang SMG cache-aware routing claims +92% throughput vs round-robin on prefix-heavy workloads; actual 3090 numbers are untested. Unique-prompt throughput should match vLLM within ~2&ndash;4%.</p>
+    <p><sup class="fn">3.6</sup> Measured on Qwen3.6-27B. Same hybrid architecture (GDN+softmax), same parameter count. Directly comparable for throughput; Qwen3.8 is a training improvement, not an architecture change.</p>
+    <p style="margin-top: 1rem;"><strong>Key sources:</strong> syv-ai/qwen38-27b-rtx3090, tfriedel/qwen3.6-rtx3090-lab, dbirks &amp; Pilcothink HF repos, lued/Qwen3.8-27B-INT8-W8A16-MTP, kingy.ai GGUF benchmarks, kgptalkie llama.cpp guide, AtomicChat/Unsloth GGUF repos, RadixArk/Qwen3.8-27B-DSpark, SGLang GitHub (sgl-project/sglang, PR #23331), Qwen official blog.</p>
+    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;11 are this host, at a 250 W power cap.</p>
+  </div>
+
+
+</main>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup · Qwen3.8-27B on RTX 3090</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="topbar"><div class="topbar-in">
+  <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
+  <div class="tabs">
+    <a href="index.html">Story</a>
+    <a href="results.html">Results</a>
+    <a href="method.html">Method</a>
+    <a href="setup.html" aria-current="page">Setup</a>
+    <a href="log.html">Log</a>
+  </div>
+</div></nav>
+<main class="wrap">
+
+<header class="hero">
+  <p class="kicker">Setup · reproduce it yourself</p>
+  <h1>Getting this running</h1>
+  <p class="standfirst">Five rungs, from the twenty-minute version to the one that runs at 212 tokens per second. Every command here was run on the machine described in the results; where something is a third-party fork or an unverified step, it says so.</p>
+</header>
+
+<p class="lede">You need one RTX 3090 (24&nbsp;GB) for everything up to rung&nbsp;4. Rung&nbsp;5 uses two. Docker with the NVIDIA container toolkit is assumed from rung&nbsp;3 onward. Weights are 4-bit throughout, so the model itself is ~17–19&nbsp;GB and the rest of the card is KV cache.</p>
+
+<h2>Before anything else: cap the power</h2>
+
+<div class="box stop">
+  <strong>This is not optional.</strong> An uncapped card here hit <code>Xid 79</code> mid-benchmark — "GPU has fallen off the bus". Unrecoverable; the machine needed a reboot. It was a 12&nbsp;V rail brownout from transient spikes under a Triton autotuner, not a driver bug. We proved that by deliberately re-running the exact workload that triggered it after capping: no recurrence across eight server starts.
+</div>
+
+<pre><code>sudo nvidia-smi -pl 250     # per-GPU power limit, watts
+sudo nvidia-smi -pm 1       # persistence mode</code></pre>
+
+<p><strong>Both reset on reboot.</strong> Re-apply them every time, before you start a server. The cap cuts peak 12&nbsp;V current by roughly 29%. It costs about <strong>14% on unassisted llama.cpp decode and nothing measurable on the vLLM path</strong> — a trade worth making, because the failure it prevents is a hard lockup mid-run.</p>
+
+<p>Rapid idle&nbsp;→&nbsp;full&nbsp;→&nbsp;idle cycling is what provokes it, which is exactly what kernel autotuners and benchmark loops do. If you only ever run steady inference you may never see it; that is not a reason to skip the cap.</p>
+
+<h2>Rung 1 — llama.cpp, as it comes</h2>
+
+<p><span class="badge">27.6 tok/s</span> &nbsp; <span class="badge">16.9 GB VRAM</span> &nbsp; ~20 minutes, no Docker</p>
+
+<p>Build llama.cpp with CUDA, pull a 4-bit GGUF, point it at the card. This is where most people start and it is a perfectly reasonable place to stop if you only need occasional single-user generation.</p>
+
+<pre><code># build (CUDA, Ampere = compute capability 8.6)
+git clone https://github.com/ggml-org/llama.cpp &amp;&amp; cd llama.cpp
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86
+cmake --build build --config Release -j
+
+# fetch a 4-bit GGUF (~17 GB)
+hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-Q4_K_XL.gguf
+
+# serve — every layer on the GPU, nothing else tuned
+./build/bin/llama-server -m Qwen3.8-27B-UD-Q4_K_XL.gguf \
+  -ngl 99 --host 127.0.0.1 --port 8080</code></pre>
+
+<div class="box warn">
+  <strong>Check your tooling actually supports the model.</strong> Ollama 0.11.10 accepted this model at <code>create</code> time — it parses the GGUF container fine — and then failed at <em>inference</em> with an opaque load error. That build predated the <code>qwen35</code> hybrid-GDN architecture by about eleven months. A successful import is not support. If you are on Ollama, check its release notes for your model's architecture before concluding the model is broken.
+</div>
+
+<h2>Rung 2 — the same llama.cpp, with flags</h2>
+
+<p><span class="badge">42.6 tok/s</span> &nbsp; <span class="badge">+54%</span> &nbsp; <span class="badge">16.9 GB VRAM</span> &nbsp; no new software</p>
+
+<p>Flash attention, a quantized KV cache, and speculative decoding using the model's own multi-token-prediction head. Same binary, same weights — this is the cheapest large win available.</p>
+
+<pre><code>./build/bin/llama-server -m Qwen3.8-27B-UD-Q4_K_XL.gguf \
+  -ngl 99 \
+  -fa on \                        # flash attention
+  -ctk q8_0 -ctv q8_0 \           # 8-bit KV cache: ~+24% prefill, no quality cost
+  --spec-type draft-mtp \         # use the model's built-in MTP head
+  --spec-draft-n-max 1 \
+  -c 65536 \
+  --host 127.0.0.1 --port 8080</code></pre>
+
+<p>The KV quantization is close to free: it bought about 24% on prompt processing here with no measurable effect on generation. It also halves the KV memory, which is what makes a 64K context comfortable on a 24&nbsp;GB card.</p>
+
+<p><strong>Draft depth is workload-dependent.</strong> With the separate DFlash2 drafter, depth 4 beat the model card's recommended 7 on this hardware — the larger verify batch cost more than the extra accepted tokens returned. Sweep it on your own traffic rather than trusting a default.</p>
+
+<h2>Rung 3 — stock vLLM</h2>
+
+<p><span class="badge">85.6 tok/s single</span> &nbsp; <span class="badge">~960 tok/s at 64 concurrent</span> &nbsp; <span class="badge">20.3 GB VRAM</span></p>
+
+<p>Move here when you need concurrency. llama.cpp has no continuous batching; vLLM does, and that is the entire reason to take on the extra complexity. Single-stream speed roughly doubles too, from speculative decoding done well.</p>
+
+<pre><code>docker run -d --name qwen38 --gpus '"device=0"' --ipc=host \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  -p 8000:8000 \
+  vllm/vllm-openai:latest \
+  --model dbirks/Qwen3.8-27B-W4A16-AutoRound \
+  --gpu-memory-utilization 0.95 \
+  --kv-cache-memory=1500000000 \
+  --max-model-len 4096 \
+  --max-num-seqs 8 \
+  --enforce-eager \
+  --trust-remote-code</code></pre>
+
+<div class="box warn">
+  <strong>Two flags that are not obvious, both of which cost us an afternoon.</strong>
+  <br><br>
+  <code>--gpu-memory-utilization</code> <strong>does not reserve room for CUDA graph capture.</strong> At 0.93 vLLM consumed 22.99&nbsp;GiB against a 22.1&nbsp;GiB budget and then OOM'd needing 784&nbsp;MiB for graphs. Pin the KV pool explicitly with <code>--kv-cache-memory</code> instead of trusting the fraction.
+  <br><br>
+  <code>--max-num-seqs</code> <strong>is bounded by Mamba cache blocks</strong> on this hybrid architecture — one block per decoding sequence. Pinning KV to 1.5&nbsp;GiB left 31 blocks against a default of 256, which is a hard <code>ValueError</code> at startup, not a warning.
+</div>
+
+<p><code>--enforce-eager</code> skips CUDA graph capture entirely. It is the safe starting point; dropping it is worth about +20% once you have the memory budget settled.</p>
+
+<h2>Rung 4 — patched vLLM</h2>
+
+<p><span class="badge">167.8 tok/s (MTP)</span> &nbsp; <span class="badge">212.1 tok/s (DFlash2)</span> &nbsp; <span class="badge">22.4–22.7 GB VRAM</span></p>
+
+<p>The largest remaining gain comes from <a href="https://github.com/syv-ai/qwen38-27b-rtx3090">syv-ai/qwen38-27b-rtx3090</a>, a third-party fork of vLLM 0.27.1 carrying fourteen patches. They target the <em>verify</em> step, which is where speculative decoding actually spends its time: split-KV verify attention, an int4-requantized <code>lm_head</code> and drafter, and a 40k-token draft vocabulary covering what the model actually emits.</p>
+
+<pre><code>git clone https://github.com/syv-ai/qwen38-27b-rtx3090
+cd qwen38-27b-rtx3090
+echo "VLLM_API_KEY=$(openssl rand -hex 24)" &gt; .env
+
+docker compose --profile single up -d     # one or a few users
+# or:  docker compose --profile batch up -d   # many concurrent requests</code></pre>
+
+<p>The build downloads the checkpoint (~19.5&nbsp;GB) and runs its own requantization steps. Expect 10–20 minutes for the image, ~5 for prep, and up to 15 minutes on a first-ever cold start while torch.compile, CUDA graph capture and FlashInfer JIT populate the cache. Warm restarts are about 60 seconds — <strong>preserve that cache volume</strong>, it is the difference.</p>
+
+<div class="box warn">
+  <strong>Know what you are taking on.</strong> This is one person's fork, pinned to vLLM 0.27.1, and its optimizations are checkpoint-specific. Upstream, the prep scripts hard-code a 128 group size for requantization while the embedding patch reads the size the checkpoint <em>declares</em> — so a checkpoint quantized at any other group size fails at load with an opaque tensor-shape error (<code>size of tensor a (160) must match tensor b (40)</code>, i.e. 5120/32 against 5120/128) rather than an honest "unsupported quantization". We wrote a local patch deriving the group size from the checkpoint's own config; it is <em>not</em> upstream and has not been verified end-to-end against a live serve. If you plan to try arbitrary community checkpoints, stock vLLM accepts formats this fork rejects.
+</div>
+
+<h3>Choosing a speculator and a context profile</h3>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Setting</th><th>Values</th><th>What we measured</th></tr></thead>
+  <tbody>
+    <tr><td><code>SPEC</code></td><td><em>empty</em> = built-in MTP k=4<br><code>dflash2</code> = DFlash2 k=7</td><td>DFlash2 wins on short prompts and code; MTP holds up better past ~8K and on prose. Neither can change output quality — speculative decoding is exact.</td></tr>
+    <tr><td><code>CTX</code></td><td><code>fast</code> bf16 KV, 64K<br><code>long</code> fp8 KV, 150K<br><code>huge</code> KVarN 4/2-bit, ~200K</td><td><code>long</code> was the strongest long-context profile. <code>huge</code> reaches the deepest context on one card but at roughly a third of the speed — take it when the request would not otherwise fit, not for throughput.</td></tr>
+    <tr><td><code>PREFIX_CACHE</code></td><td><code>0</code> / <code>1</code></td><td>Set <code>0</code> for clean benchmarking, <code>1</code> in production. On repeat turns over the same document the fork reports ~23&nbsp;s → ~1&nbsp;s time-to-first-token.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Rung 5 — two cards</h2>
+
+<p><span class="badge">905.6 tok/s at 16 concurrent</span> &nbsp; <span class="badge">151 tok/s single-stream</span></p>
+
+<p><strong>Run two independent replicas behind a load balancer — do not split one model across both cards.</strong> A tensor/layer split gained only about 10% on decode here, because the PCIe hops it adds very nearly cancel the extra memory bandwidth. It did buy ~35% on prefill, so it is not useless; it is just the wrong trade for most workloads. Two replicas double your throughput instead.</p>
+
+<pre><code>cp env.example .env            # set VLLM_API_KEY, REPO_DIR
+./preflight.sh                 # power cap, image, ports, disk
+./up.sh --wait                 # both replicas + LB, block until healthy
+# traffic goes to :18000 — the replica ports are for debugging and telemetry</code></pre>
+
+<p>Round-robin, not <code>least_conn</code>, and that choice is deliberate: <code>least_conn</code> sends more traffic to whichever replica is currently faster, so if you are ever comparing two configurations the faster arm also gets a larger and differently-distributed sample. Equal weights keep the comparison honest.</p>
+
+<div class="box">
+  <strong>The two cards are not identical.</strong> In the same configuration, one measured 5–10% slower than the other, reproducibly, and we never isolated why. If you compare two settings by running one on each card, swap them halfway and average — otherwise you cannot separate "this setting is faster" from "this card is faster".
+</div>
+
+<h2>What fits in 24 GB</h2>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Configuration</th><th>Weights</th><th>Total VRAM</th><th>Context</th></tr></thead>
+  <tbody>
+    <tr><td>llama.cpp, 4-bit GGUF, q8_0 KV</td><td class="n">~17 GB</td><td class="n">16.9 GB</td><td class="n">64K comfortably</td></tr>
+    <tr><td>Stock vLLM, 4-bit</td><td class="n">~17.5 GB</td><td class="n">19.5–20.3 GB</td><td class="n">4K–8K at these flags</td></tr>
+    <tr class="hl"><td>Patched vLLM, <code>CTX=fast</code></td><td class="n">~17.5 GB</td><td class="n">22.4–22.7 GB</td><td class="n">64K</td></tr>
+    <tr><td>Patched vLLM, <code>CTX=long</code> (fp8 KV)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~150K</td></tr>
+    <tr><td>Patched vLLM, <code>CTX=huge</code> (KVarN)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~192K measured</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>A 4-bit checkpoint whose <code>lm_head</code> and drafter stay in BF16 costs about 1.5&nbsp;GB more than one where they are also quantized — enough that speculation stopped fitting on a single card in one of our comparisons. If you are tight on memory, that is the first thing to look at.</p>
+
+<p>Two 4-bit quantizations of the same model measured 32.7 and 32.9 tok/s under identical conditions — <strong>indistinguishable</strong>. Do not agonize over which 4-bit checkpoint to use; do check whether its <code>lm_head</code> is quantized.</p>
+
+<h2>Three things that will waste your afternoon</h2>
+
+<div class="box warn">
+  <strong>1. Reasoning is on by default, and it fails silently.</strong> Recent models emit reasoning tokens unless told otherwise, inflating token counts several-fold. Worse: if your server runs a reasoning parser (<code>--reasoning-parser qwen3</code>), that content is extracted into a <em>separate</em> field — so a client expecting inline tags receives <strong>completely empty content with a normal HTTP 200 and a full token count</strong>. One of our benchmarks ran to completion scoring a model whose output it could not read. Client-side flags are frequently no-ops. What works is putting it in the request body:
+  <pre><code>{"model": "...", "messages": [...],
+ "chat_template_kwargs": {"enable_thinking": false}}</code></pre>
+  Then <em>verify</em> you are getting non-empty content back. Do not assume.
+</div>
+
+<div class="box warn">
+  <strong>2. Your reverse proxy truncates long prompts.</strong> nginx defaults <code>client_max_body_size</code> to 1&nbsp;MB and returns 413 before the request ever reaches vLLM. A 64K-token prompt exceeds that comfortably, and the failures look like model errors. Set it explicitly:
+  <pre><code>client_max_body_size 32m;</code></pre>
+  While you are in there: <code>proxy_buffering off</code> for streaming, and <code>proxy_read_timeout 1800s</code> — a 192K-context prefill genuinely takes about six minutes.
+</div>
+
+<div class="box warn">
+  <strong>3. Model-written code will hang your harness.</strong> If you run any benchmark that executes generated code, impose your own timeout. One case here stalled for 68 minutes on a <code>node</code> process spinning at 99.9% CPU — model-written JavaScript with an infinite loop. Aider's benchmark has no per-test wall-clock kill. Run it in a container, and monitor for stalls.
+</div>
+
+<h2>Verify it works</h2>
+
+<pre><code>curl -s http://127.0.0.1:18000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $VLLM_API_KEY" \
+  -d '{"model":"qwen3.8-27b",
+       "messages":[{"role":"user","content":"Write a Python function that reverses a linked list."}],
+       "max_tokens":200, "temperature":0,
+       "chat_template_kwargs":{"enable_thinking":false}}' | jq -r '.choices[0].message.content'</code></pre>
+
+<p>If that returns an empty string, you have hit gotcha&nbsp;1 above — the tokens were generated and went into a field you are not reading.</p>
+
+<h2>Config files</h2>
+
+<p>These are the working files from the two-card deployment, with the API key replaced by a placeholder and host-specific paths genericized. Nothing else has been changed.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>File</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td><a href="configs/docker-compose.yml">docker-compose.yml</a></td><td>Both replicas, the load balancer and the one-shot prep job. Each replica configured independently so a config change is an <code>.env</code> edit, never a hand-built <code>docker run</code>.</td></tr>
+    <tr><td><a href="configs/qwen-lb.conf">qwen-lb.conf</a></td><td>nginx round-robin with metadata-only request logging — timings, which replica, status, byte counts. Deliberately never logs prompts or the auth header.</td></tr>
+    <tr><td><a href="configs/env.example">env.example</a></td><td>Every knob: the API key, per-replica speculator and context profile, prefix caching.</td></tr>
+    <tr><td><a href="configs/preflight.sh">preflight.sh</a></td><td>Post-boot checks: power cap, persistence, Xid history, image, cache volume, ports, disk. Refuses to pass if the cap is missing.</td></tr>
+    <tr><td><a href="configs/up.sh">up.sh</a></td><td>Brings the stack up and optionally blocks until both replicas answer <code>/health</code>.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="foot">
+  <p><strong>What is verified and what is not.</strong> Every command on this page was run on the machine described in the <a href="results.html">results</a>, except where noted: the llama.cpp build commands are reconstructed from a working install rather than replayed from scratch, and the local group-size patch to the syv-ai prep scripts unblocks <em>loading</em> only — whether the resulting checkpoint is numerically sound was never tested against a live serve.</p>
+  <p>Numbers here are one model, one machine, at 4-bit, with reasoning disabled. They are honest measurements of this deployment, not claims about the model's capability, and they are not comparable to published leaderboard figures. See <a href="method.html">Method</a> for what has to be held constant before two numbers can be compared at all.</p>
+</div>
+
+</main>
+</body>
+</html>

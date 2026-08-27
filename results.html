@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Results · Qwen3.8-27B on RTX 3090</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="topbar"><div class="topbar-in">
+  <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
+  <div class="tabs">
+    <a href="index.html">Story</a>
+    <a href="results.html" aria-current="page">Results</a>
+    <a href="method.html">Method</a>
+    <a href="setup.html">Setup</a>
+    <a href="log.html">Log</a>
+  </div>
+</div></nav>
+<main class="wrap">
+
+<header class="hero">
+  <p class="kicker">Results &#183; all measurements</p>
+  <h1>Every number we measured</h1>
+  <p class="standfirst">Qwen3.8-27B on 2&#215; RTX 3090, over five days. Speed, throughput, context
+  scaling, correctness and agentic behaviour &mdash; with the provenance of each figure attached,
+  because several of them are not what they first appeared to be.</p>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="v">212.1<small>tok/s</small></div><div class="l">best single-stream</div></div>
+  <div class="stat"><div class="v">7.7<small>&#215;</small></div><div class="l">tuning ladder span</div></div>
+  <div class="stat"><div class="v">959.8<small>tok/s</small></div><div class="l">one GPU at C=64</div></div>
+  <div class="stat"><div class="v">192<small>K</small></div><div class="l">deepest context served</div></div>
+  <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">Aider polyglot pass_2</div></div>
+</div>
+
+<div class="box">
+  <strong>How to read this page.</strong> Numbers come from three eras of the study, and they were
+  not all measured under equal conditions. Where a figure was taken while a second GPU was busy,
+  or before the power cap, or with a different prompt corpus, it says so inline. The canonical
+  table below supersedes any earlier figure it contradicts.
+</div>
+
+<h2>The ladder</h2>
+<p>Same model, same card, same prompt. The only variable is the serving software. Every rung is
+the same 4-bit checkpoint &mdash; nothing was quantized further between the bottom and the top.</p>
+
+<figure class="fig">
+  <figcaption>Decode speed by configuration &#183; single RTX 3090</figcaption>
+  <svg class="chart" viewBox="0 0 760 302" role="img" aria-labelledby="lad-t">
+<title id="lad-t">Decode speed by configuration on a single RTX 3090, 1K-token prompt</title>
+<line class="grid" x1="276.0" x2="276.0" y1="16" y2="258.0"/>
+<text class="tick" x="276.0" y="274.0" text-anchor="middle">0</text>
+<line class="grid" x1="366.9" x2="366.9" y1="16" y2="258.0"/>
+<text class="tick" x="366.9" y="274.0" text-anchor="middle">50</text>
+<line class="grid" x1="457.7" x2="457.7" y1="16" y2="258.0"/>
+<text class="tick" x="457.7" y="274.0" text-anchor="middle">100</text>
+<line class="grid" x1="548.6" x2="548.6" y1="16" y2="258.0"/>
+<text class="tick" x="548.6" y="274.0" text-anchor="middle">150</text>
+<line class="grid" x1="639.5" x2="639.5" y1="16" y2="258.0"/>
+<text class="tick" x="639.5" y="274.0" text-anchor="middle">200</text>
+<text class="axlbl" x="485" y="296" text-anchor="middle">decode tokens/sec &#183; single RTX 3090 &#183; 1K-token prompt</text>
+<path class="bar b-floor" d="M276,20 L321.2,20 Q326.2,20 326.2,25 L326.2,39 Q326.2,44 321.2,44 L276,44 Z"/>
+<text class="rowlbl" x="264" y="36.0" text-anchor="end">llama.cpp, out of the box</text>
+<text class="rowval b-floor" x="334.2" y="36.0">27.6</text>
+<path class="bar b-mid" d="M276,55 L330.6,55 Q335.6,55 335.6,60 L335.6,74 Q335.6,79 330.6,79 L276,79 Z"/>
+<text class="rowlbl" x="264" y="71.0" text-anchor="end">Stock vLLM, no speculation</text>
+<text class="rowval b-mid" x="343.6" y="71.0">32.8</text>
+<path class="bar b-mid" d="M276,90 L348.4,90 Q353.4,90 353.4,95 L353.4,109 Q353.4,114 348.4,114 L276,114 Z"/>
+<text class="rowlbl" x="264" y="106.0" text-anchor="end">llama.cpp, tuned (FA + q8 KV + MTP)</text>
+<text class="rowval b-mid" x="361.4" y="106.0">42.6</text>
+<path class="bar b-mid" d="M276,125 L349.3,125 Q354.3,125 354.3,130 L354.3,144 Q354.3,149 349.3,149 L276,149 Z"/>
+<text class="rowlbl" x="264" y="141.0" text-anchor="end">Patched vLLM batch profile, no spec</text>
+<text class="rowval b-mid" x="362.3" y="141.0">43.1</text>
+<path class="bar b-mid" d="M276,160 L426.6,160 Q431.6,160 431.6,165 L431.6,179 Q431.6,184 426.6,184 L276,184 Z"/>
+<text class="rowlbl" x="264" y="176.0" text-anchor="end">Stock vLLM + MTP k=4</text>
+<text class="rowval b-mid" x="439.6" y="176.0">85.6</text>
+<path class="bar b-mid" d="M276,195 L576.0,195 Q581.0,195 581.0,200 L581.0,214 Q581.0,219 576.0,219 L276,219 Z"/>
+<text class="rowlbl" x="264" y="211.0" text-anchor="end">Patched vLLM + MTP k=4</text>
+<text class="rowval b-mid" x="589.0" y="211.0">167.8</text>
+<path class="bar b-top" d="M276,230 L656.5,230 Q661.5,230 661.5,235 L661.5,249 Q661.5,254 656.5,254 L276,254 Z"/>
+<text class="rowlbl" x="264" y="246.0" text-anchor="end">Patched vLLM + DFlash2 k=7</text>
+<text class="rowval b-top" x="669.5" y="246.0">212.1</text>
+<text class="rownote" x="286" y="246.0">BEST SINGLE-STREAM</text>
+<line class="axis" x1="276" x2="276" y1="16" y2="258.0"/>
+</svg>
+</figure>
+
+<h2>Canonical single-GPU figures</h2>
+<p class="lede">Re-measured strictly single-tenant, one configuration at a time, <strong>mean of five
+runs</strong> with standard deviations. 512-token greedy completions, reasoning disabled, 250&nbsp;W
+power cap. <strong>Where an earlier section of this study disagrees, these win.</strong></p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Configuration</th><th>~1K prompt</th><th>~55 prompt</th><th>Acceptance</th><th>Tokens/step</th><th>TTFT</th><th>Peak VRAM</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td><strong>Patched vLLM + DFlash2 k=7</strong></td><td class="n">212.1 <span class="sub">&#177;1.25</span></td><td class="n">145.7 <span class="sub">&#177;1.49</span></td><td class="n">0.661</td><td class="n">5.63</td><td class="n">0.88 s</td><td class="n">22,973</td></tr>
+    <tr><td><strong>Patched vLLM + MTP k=4</strong></td><td class="n">167.8 <span class="sub">&#177;0.73</span></td><td class="n">129.8 <span class="sub">&#177;1.30</span></td><td class="n">0.764</td><td class="n">5.29</td><td class="n">0.88 s</td><td class="n">23,217</td></tr>
+    <tr><td>Stock vLLM + MTP k=4</td><td class="n">85.6 <span class="sub">&#177;0.77</span></td><td class="n">66.5 <span class="sub">&#177;0.15</span></td><td class="n">0.901</td><td class="n">4.60</td><td class="n">1.02 s</td><td class="n">20,833</td></tr>
+    <tr><td>Patched vLLM batch profile, no spec</td><td class="n">43.1 <span class="sub">&#177;0.68</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">0.61 s</td><td class="n">23,843</td></tr>
+    <tr><td>llama.cpp + MTP n=1, tuned</td><td class="n">42.6 <span class="sub">&#177;0.79</span></td><td class="n">40.6 <span class="sub">&#177;0.05</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">1.09 s</td><td class="n">17,297</td></tr>
+    <tr><td>Stock vLLM, no speculation</td><td class="n">32.8 <span class="sub">&#177;0.08</span></td><td class="n">32.6 <span class="sub">&#177;0.09</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">0.98 s</td><td class="n">19,969</td></tr>
+    <tr><td><strong>llama.cpp, out-of-box defaults</strong></td><td class="n">27.6 <span class="sub">&#177;0.55</span></td><td class="n">26.9 <span class="sub">&#177;0.05</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">0.12 s <span class="sub">cache-assisted</span></td><td class="n">17,323</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Spreads are <strong>0.1&ndash;2.0%</strong>, far tighter than the ~5% noise floor quoted elsewhere in
+this study. Both facts are true and they are not the same fact: repeated measurements against one
+running server agree closely, but <em>restarting</em> the server shifts the whole set &mdash; the same
+card and configuration produced 165.4 then 159.6&nbsp;tok/s across a restart. Treat the restart
+spread as the floor for comparing two configurations.</p>
+
+<div class="box warn">
+  <strong>One open discrepancy, stated rather than smoothed.</strong> DFlash2 at ~1K measures
+  <strong>212.1 here against 181.5</strong> in the earlier coding suite &mdash; a 17% gap. Both runs
+  were single-tenant and this one has a &#177;0.6% spread across five repeats. The cause is
+  unidentified. If you need a conservative figure for this configuration, use the lower one.
+</div>
+
+<h3>Prompt length changes speed only through acceptance</h3>
+<p>A control settles what looked like a measurement error. With speculation <strong>off</strong>, stock
+vLLM measures 32.6&nbsp;tok/s at 55 tokens and 32.8 at 1K &mdash; a 0.6% difference, i.e. none. Turn
+speculation on and the same engine gains 29%; the patched stack with DFlash2 gains 46%, its
+acceptance climbing 0.420&nbsp;&rarr;&nbsp;0.661. A longer prefix of coherent context is simply easier
+to draft against.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Configuration</th><th>55 tok</th><th>1K tok</th><th>Gain</th><th>Acceptance shift</th></tr></thead>
+  <tbody>
+    <tr><td>Patched vLLM + DFlash2 k=7</td><td class="n">145.7</td><td class="n">212.1</td><td class="n">+46%</td><td class="n">0.420 &rarr; 0.661</td></tr>
+    <tr><td>Patched vLLM + MTP k=4</td><td class="n">129.8</td><td class="n">167.8</td><td class="n">+29%</td><td class="n">0.572 &rarr; 0.764</td></tr>
+    <tr><td>Stock vLLM + MTP k=4</td><td class="n">66.5</td><td class="n">85.6</td><td class="n">+29%</td><td class="n">0.642 &rarr; 0.901</td></tr>
+    <tr class="hl"><td><strong>Stock vLLM, no speculation</strong></td><td class="n">32.6</td><td class="n">32.8</td><td class="n"><strong>+0.6%</strong></td><td class="n">n/a</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The consequence: <strong>any speed comparison across different prompt lengths is meaningless
+unless acceptance is reported alongside it.</strong> This study made exactly that mistake once,
+&ldquo;discovering&rdquo; a 20% contention error that did not exist.</p>
+
+<h2>Throughput under concurrency</h2>
+<div class="tw">
+<table>
+  <thead><tr><th>Configuration</th><th>C=1</th><th>C=4</th><th>C=16</th><th>C=32</th><th>C=64</th></tr></thead>
+  <tbody>
+    <tr><td>Batch profile, one GPU <span class="sub">INT8 activations, fp8 KV, no speculation</span></td><td class="n">&mdash;</td><td class="n">&mdash;</td><td class="n">525.9</td><td class="n">761.8</td><td class="n"><strong>959.8</strong></td></tr>
+    <tr><td>Two replicas + load balancer <span class="sub">MTP k=4, round-robin</span></td><td class="n">151.1</td><td class="n">457.4</td><td class="n"><strong>905.6</strong></td><td class="n">&mdash;</td><td class="n">&mdash;</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Two replicas win up to about 16 concurrent requests while keeping every individual request fast;
+past that, the batch profile&rsquo;s INT8 tensor-core GEMMs take over. An earlier run measured the
+single-GPU C=64 figure at 1,023&nbsp;tok/s &mdash; that measurement overlapped other GPU work, but the
+card was already saturated at 100% utilisation and 249&nbsp;W, so saturated-throughput figures are
+largely contention-insensitive and the two agree within 6%.</p>
+
+<h2>Context scaling to 64K</h2>
+<div class="box warn">
+  <strong>Provenance.</strong> These curves were measured with two sweeps running concurrently on
+  the two cards. Cross-GPU contention depresses batch-1 decode by up to 39%, so <strong>the vLLM
+  curves and the llama.cpp 1&#215;GPU curve read low</strong>. The llama.cpp 2&#215;GPU curve owned both
+  cards and is clean. The <em>shapes</em> survive; the cross-configuration ranking does not.
+</div>
+
+<figure class="fig">
+  <figcaption>Decode speed versus prompt length</figcaption>
+  <svg class="chart" viewBox="0 0 760 330" role="img" aria-labelledby="ctxd-t">
+<title id="ctxd-t">Decode speed versus prompt length</title>
+<line class="grid" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="tick" x="50" y="288.0" text-anchor="end">0</text>
+<line class="grid" x1="58" x2="582" y1="233.0" y2="233.0"/>
+<text class="tick" x="50" y="237.0" text-anchor="end">20</text>
+<line class="grid" x1="58" x2="582" y1="182.0" y2="182.0"/>
+<text class="tick" x="50" y="186.0" text-anchor="end">40</text>
+<line class="grid" x1="58" x2="582" y1="131.0" y2="131.0"/>
+<text class="tick" x="50" y="135.0" text-anchor="end">60</text>
+<line class="grid" x1="58" x2="582" y1="79.9" y2="79.9"/>
+<text class="tick" x="50" y="83.9" text-anchor="end">80</text>
+<line class="grid" x1="58" x2="582" y1="28.9" y2="28.9"/>
+<text class="tick" x="50" y="32.9" text-anchor="end">100</text>
+<text class="tick" x="83.5" y="302" text-anchor="middle">512</text>
+<text class="tick" x="226.7" y="302" text-anchor="middle">2K</text>
+<text class="tick" x="369.9" y="302" text-anchor="middle">8K</text>
+<text class="tick" x="441.4" y="302" text-anchor="middle">16K</text>
+<text class="tick" x="513.0" y="302" text-anchor="middle">32K</text>
+<line class="axis" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="axlbl" x="320" y="322" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s1" d="M82.5,42.2 L231.1,115.1 L371.4,154.9 L441.7,185.8 L512.9,195.2 L576.0,128.1"/>
+<circle class="pt s1" cx="82.5" cy="42.2" r="4"/>
+<circle class="pt s1" cx="231.1" cy="115.1" r="4"/>
+<circle class="pt s1" cx="371.4" cy="154.9" r="4"/>
+<circle class="pt s1" cx="441.7" cy="185.8" r="4"/>
+<circle class="pt s1" cx="512.9" cy="195.2" r="4"/>
+<circle class="pt s1" cx="576.0" cy="128.1" r="4"/>
+<path class="ln s2" d="M82.5,112.1 L231.1,138.6 L371.4,157.2 L441.7,151.4 L512.9,189.9 L576.0,180.2"/>
+<circle class="pt s2" cx="82.5" cy="112.1" r="4"/>
+<circle class="pt s2" cx="231.1" cy="138.6" r="4"/>
+<circle class="pt s2" cx="371.4" cy="157.2" r="4"/>
+<circle class="pt s2" cx="441.7" cy="151.4" r="4"/>
+<circle class="pt s2" cx="512.9" cy="189.9" r="4"/>
+<circle class="pt s2" cx="576.0" cy="180.2" r="4"/>
+<path class="ln s3" d="M81.9,126.6 L228.9,128.7 L368.5,142.2 L443.2,145.0 L510.3,167.9 L570.8,189.4"/>
+<circle class="pt s3" cx="81.9" cy="126.6" r="4"/>
+<circle class="pt s3" cx="228.9" cy="128.7" r="4"/>
+<circle class="pt s3" cx="368.5" cy="142.2" r="4"/>
+<circle class="pt s3" cx="443.2" cy="145.0" r="4"/>
+<circle class="pt s3" cx="510.3" cy="167.9" r="4"/>
+<circle class="pt s3" cx="570.8" cy="189.4" r="4"/>
+<path class="ln s4" d="M81.9,164.4 L228.9,165.9 L368.5,175.3 L443.2,176.9 L510.3,189.1 L570.8,196.8"/>
+<circle class="pt s4" cx="81.9" cy="164.4" r="4"/>
+<circle class="pt s4" cx="228.9" cy="165.9" r="4"/>
+<circle class="pt s4" cx="368.5" cy="175.3" r="4"/>
+<circle class="pt s4" cx="443.2" cy="176.9" r="4"/>
+<circle class="pt s4" cx="510.3" cy="189.1" r="4"/>
+<circle class="pt s4" cx="570.8" cy="196.8" r="4"/>
+<path class="ln s5" d="M82.5,170.0 L231.1,177.1 L371.4,179.4 L441.7,200.6 L512.9,196.5 L570.8,208.8"/>
+<circle class="pt s5" cx="82.5" cy="170.0" r="4"/>
+<circle class="pt s5" cx="231.1" cy="177.1" r="4"/>
+<circle class="pt s5" cx="371.4" cy="179.4" r="4"/>
+<circle class="pt s5" cx="441.7" cy="200.6" r="4"/>
+<circle class="pt s5" cx="512.9" cy="196.5" r="4"/>
+<circle class="pt s5" cx="570.8" cy="208.8" r="4"/>
+<line class="key s1" x1="592" x2="604" y1="128.1" y2="128.1"/>
+<text class="endlbl" x="608" y="132.1"><tspan class="val">61</tspan> vLLM DFlash2</text>
+<line class="key s2" x1="592" x2="604" y1="180.2" y2="180.2"/>
+<text class="endlbl" x="608" y="184.2"><tspan class="val">41</tspan> vLLM MTP</text>
+<line class="leader" x1="576.8" y1="189.4" x2="590" y2="195.2"/>
+<line class="key s3" x1="592" x2="604" y1="195.2" y2="195.2"/>
+<text class="endlbl" x="608" y="199.2"><tspan class="val">37</tspan> llama.cpp 2×GPU</text>
+<line class="leader" x1="576.8" y1="196.8" x2="590" y2="210.2"/>
+<line class="key s4" x1="592" x2="604" y1="210.2" y2="210.2"/>
+<text class="endlbl" x="608" y="214.2"><tspan class="val">34</tspan> llama.cpp 1×GPU</text>
+<line class="leader" x1="576.8" y1="208.8" x2="590" y2="225.2"/>
+<line class="key s5" x1="592" x2="604" y1="225.2" y2="225.2"/>
+<text class="endlbl" x="608" y="229.2"><tspan class="val">30</tspan> llama.cpp DFlash2</text>
+</svg>
+</figure>
+
+<figure class="fig">
+  <figcaption>Time to first token versus prompt length</figcaption>
+  <svg class="chart" viewBox="0 0 760 330" role="img" aria-labelledby="ctxt-t">
+<title id="ctxt-t">Time to first token versus prompt length</title>
+<line class="grid" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="tick" x="50" y="288.0" text-anchor="end">0</text>
+<line class="grid" x1="58" x2="582" y1="237.1" y2="237.1"/>
+<text class="tick" x="50" y="241.1" text-anchor="end">20</text>
+<line class="grid" x1="58" x2="582" y1="190.3" y2="190.3"/>
+<text class="tick" x="50" y="194.3" text-anchor="end">40</text>
+<line class="grid" x1="58" x2="582" y1="143.4" y2="143.4"/>
+<text class="tick" x="50" y="147.4" text-anchor="end">60</text>
+<line class="grid" x1="58" x2="582" y1="96.5" y2="96.5"/>
+<text class="tick" x="50" y="100.5" text-anchor="end">80</text>
+<line class="grid" x1="58" x2="582" y1="49.7" y2="49.7"/>
+<text class="tick" x="50" y="53.7" text-anchor="end">100</text>
+<text class="tick" x="83.5" y="302" text-anchor="middle">512</text>
+<text class="tick" x="226.7" y="302" text-anchor="middle">2K</text>
+<text class="tick" x="369.9" y="302" text-anchor="middle">8K</text>
+<text class="tick" x="441.4" y="302" text-anchor="middle">16K</text>
+<text class="tick" x="513.0" y="302" text-anchor="middle">32K</text>
+<line class="axis" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="axlbl" x="320" y="322" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s2" d="M82.5,282.1 L231.1,277.0 L371.4,255.4 L441.7,237.6 L512.9,160.0 L576.0,42.2"/>
+<circle class="pt s2" cx="82.5" cy="282.1" r="4"/>
+<circle class="pt s2" cx="231.1" cy="277.0" r="4"/>
+<circle class="pt s2" cx="371.4" cy="255.4" r="4"/>
+<circle class="pt s2" cx="441.7" cy="237.6" r="4"/>
+<circle class="pt s2" cx="512.9" cy="160.0" r="4"/>
+<circle class="pt s2" cx="576.0" cy="42.2" r="4"/>
+<path class="ln s1" d="M82.5,282.4 L231.1,277.7 L371.4,256.8 L441.7,225.7 L512.9,160.3 L576.0,119.7"/>
+<circle class="pt s1" cx="82.5" cy="282.4" r="4"/>
+<circle class="pt s1" cx="231.1" cy="277.7" r="4"/>
+<circle class="pt s1" cx="371.4" cy="256.8" r="4"/>
+<circle class="pt s1" cx="441.7" cy="225.7" r="4"/>
+<circle class="pt s1" cx="512.9" cy="160.3" r="4"/>
+<circle class="pt s1" cx="576.0" cy="119.7" r="4"/>
+<path class="ln s4" d="M81.9,282.6 L228.9,279.1 L368.5,266.0 L443.2,245.6 L510.3,204.6 L570.8,123.3"/>
+<circle class="pt s4" cx="81.9" cy="282.6" r="4"/>
+<circle class="pt s4" cx="228.9" cy="279.1" r="4"/>
+<circle class="pt s4" cx="368.5" cy="266.0" r="4"/>
+<circle class="pt s4" cx="443.2" cy="245.6" r="4"/>
+<circle class="pt s4" cx="510.3" cy="204.6" r="4"/>
+<circle class="pt s4" cx="570.8" cy="123.3" r="4"/>
+<path class="ln s3" d="M81.9,282.8 L228.9,280.0 L368.5,270.9 L443.2,256.4 L510.3,223.8 L570.8,140.6"/>
+<circle class="pt s3" cx="81.9" cy="282.8" r="4"/>
+<circle class="pt s3" cx="228.9" cy="280.0" r="4"/>
+<circle class="pt s3" cx="368.5" cy="270.9" r="4"/>
+<circle class="pt s3" cx="443.2" cy="256.4" r="4"/>
+<circle class="pt s3" cx="510.3" cy="223.8" r="4"/>
+<circle class="pt s3" cx="570.8" cy="140.6" r="4"/>
+<line class="key s2" x1="592" x2="604" y1="42.2" y2="42.2"/>
+<text class="endlbl" x="608" y="46.2"><tspan class="val">103</tspan> vLLM MTP</text>
+<line class="key s1" x1="592" x2="604" y1="119.7" y2="119.7"/>
+<text class="endlbl" x="608" y="123.7"><tspan class="val">70</tspan> vLLM DFlash2</text>
+<line class="leader" x1="576.8" y1="123.3" x2="590" y2="134.7"/>
+<line class="key s4" x1="592" x2="604" y1="134.7" y2="134.7"/>
+<text class="endlbl" x="608" y="138.7"><tspan class="val">69</tspan> llama.cpp 1×GPU</text>
+<line class="leader" x1="576.8" y1="140.6" x2="590" y2="149.7"/>
+<line class="key s3" x1="592" x2="604" y1="149.7" y2="149.7"/>
+<text class="endlbl" x="608" y="153.7"><tspan class="val">61</tspan> llama.cpp 2×GPU</text>
+</svg>
+</figure>
+
+<p>Time to first token is the honest cost of long context, and it is brutally linear:
+<strong>+1.14 seconds per 1,000 tokens, correlation 1.00</strong>. At 61K a request waits
+<strong>69 seconds</strong> before its first token &mdash; roughly six times the entire decode time of a
+500-token reply. Speculative decoding accelerates generation, not prefill, so the speculator is
+nearly irrelevant here and prefix caching is the only lever that matters.</p>
+
+<h2>Beyond 64K</h2>
+<p>The 64K ceiling above is the deployed profile&rsquo;s, not the model&rsquo;s &mdash; Qwen3.8 is 262K
+native. Reaching further means changing the KV cache, and each option pays differently.</p>
+
+<figure class="fig">
+  <figcaption>Decode speed beyond 64K context</figcaption>
+  <svg class="chart" viewBox="0 0 760 330" role="img" aria-labelledby="ctxl-t">
+<title id="ctxl-t">Decode speed beyond 64K context</title>
+<line class="grid" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="tick" x="50" y="288.0" text-anchor="end">0</text>
+<line class="grid" x1="58" x2="582" y1="247.1" y2="247.1"/>
+<text class="tick" x="50" y="251.1" text-anchor="end">10</text>
+<line class="grid" x1="58" x2="582" y1="210.1" y2="210.1"/>
+<text class="tick" x="50" y="214.1" text-anchor="end">20</text>
+<line class="grid" x1="58" x2="582" y1="173.2" y2="173.2"/>
+<text class="tick" x="50" y="177.2" text-anchor="end">30</text>
+<line class="grid" x1="58" x2="582" y1="136.2" y2="136.2"/>
+<text class="tick" x="50" y="140.2" text-anchor="end">40</text>
+<line class="grid" x1="58" x2="582" y1="99.3" y2="99.3"/>
+<text class="tick" x="50" y="103.3" text-anchor="end">50</text>
+<line class="grid" x1="58" x2="582" y1="62.3" y2="62.3"/>
+<text class="tick" x="50" y="66.3" text-anchor="end">60</text>
+<line class="grid" x1="58" x2="582" y1="25.4" y2="25.4"/>
+<text class="tick" x="50" y="29.4" text-anchor="end">70</text>
+<text class="tick" x="95.8" y="302" text-anchor="middle">64K</text>
+<text class="tick" x="276.7" y="302" text-anchor="middle">100K</text>
+<text class="tick" x="450.2" y="302" text-anchor="middle">150K</text>
+<text class="tick" x="573.4" y="302" text-anchor="middle">200K</text>
+<line class="axis" x1="58" x2="582" y1="284.0" y2="284.0"/>
+<text class="axlbl" x="320" y="322" text-anchor="middle">prompt tokens (log scale)</text>
+<path class="ln s1" d="M113.4,92.3 L273.0,57.5 L448.9,47.9"/>
+<circle class="pt s1" cx="113.4" cy="92.3" r="4"/>
+<circle class="pt s1" cx="273.0" cy="57.5" r="4"/>
+<circle class="pt s1" cx="448.9" cy="47.9" r="4"/>
+<path class="ln s2" d="M113.4,176.5 L273.0,139.2 L382.4,141.0"/>
+<circle class="pt s2" cx="113.4" cy="176.5" r="4"/>
+<circle class="pt s2" cx="273.0" cy="139.2" r="4"/>
+<circle class="pt s2" cx="382.4" cy="141.0" r="4"/>
+<path class="ln s3" d="M273.0,155.4 L454.6,183.9 L557.1,196.4"/>
+<circle class="pt s3" cx="273.0" cy="155.4" r="4"/>
+<circle class="pt s3" cx="454.6" cy="183.9" r="4"/>
+<circle class="pt s3" cx="557.1" cy="196.4" r="4"/>
+<path class="ln s4" d="M113.4,163.2 L273.0,172.8 L454.6,190.9"/>
+<circle class="pt s4" cx="113.4" cy="163.2" r="4"/>
+<circle class="pt s4" cx="273.0" cy="172.8" r="4"/>
+<circle class="pt s4" cx="454.6" cy="190.9" r="4"/>
+<line class="key s1" x1="592" x2="604" y1="47.9" y2="47.9"/>
+<text class="endlbl" x="608" y="51.9"><tspan class="val">64</tspan> CTX=long MTP (fp8)</text>
+<line class="key s2" x1="592" x2="604" y1="141.0" y2="141.0"/>
+<text class="endlbl" x="608" y="145.0"><tspan class="val">39</tspan> CTX=long DFlash2 (int8)</text>
+<line class="key s4" x1="592" x2="604" y1="190.9" y2="190.9"/>
+<text class="endlbl" x="608" y="194.9"><tspan class="val">25</tspan> llama.cpp q8 KV</text>
+<line class="leader" x1="563.1" y1="196.4" x2="590" y2="205.9"/>
+<line class="key s3" x1="592" x2="604" y1="205.9" y2="205.9"/>
+<text class="endlbl" x="608" y="209.9"><tspan class="val">24</tspan> CTX=huge KVarN 4/2-bit</text>
+</svg>
+</figure>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Profile</th><th>KV cache</th><th>Max served</th><th>Decode at max</th><th>Provenance</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td><strong>vLLM CTX=long + MTP k=3</strong></td><td>fp8 (FlashInfer)</td><td class="n">149,525</td><td class="n">63.9</td><td><span class="badge warn">contended</span> <span class="sub">true value is higher</span></td></tr>
+    <tr><td>vLLM CTX=long + DFlash2</td><td>int8 per-token-head</td><td class="n">128,013</td><td class="n">38.7</td><td><span class="badge warn">partly contended</span></td></tr>
+    <tr><td>vLLM CTX=huge + MTP</td><td>KVarN 4/2-bit</td><td class="n">192,517</td><td class="n">23.7</td><td><span class="badge">clean</span></td></tr>
+    <tr><td>llama.cpp + MTP n=1</td><td>q8_0</td><td class="n">151,530</td><td class="n">25.2</td><td><span class="badge warn">contended</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Two caveats on the KVarN row. Its documentation describes a 245,760-token ceiling, but the
+launcher resolved <code>max-model-len</code> to 200,000 on this host, so 192.5K is the deepest point
+<em>measured</em> rather than a hard limit. llama.cpp fails to allocate past roughly 160K on a single
+card &mdash; <code>-c 200000</code> OOMs at load.</p>
+
+<div class="box">
+  <strong>The fp8 profile gets faster with depth</strong> &mdash; 51.9 &rarr; 63.9&nbsp;tok/s from 68K to
+  150K. That is backwards for attention cost, and it is the acceptance effect again: a longer prefix
+  of coherent documentation is easier to draft against. Since this row is also the contended one, its
+  true figures are higher still.
+</div>
+
+<h2>Correctness</h2>
+<p class="lede">Speed is half the question. Speculative decoding cannot answer the other half &mdash;
+it is mathematically exact, so a speculator can never change what the model would have said. Any
+quality difference comes from the quantization or the KV dtype.</p>
+
+<figure class="fig">
+  <figcaption>Aider polyglot pass rate by language</figcaption>
+  <svg class="chart" viewBox="0 0 760 300" role="img" aria-labelledby="aid-t">
+<title id="aid-t">Aider polyglot pass rate by language, first attempt versus after test feedback</title>
+<line class="grid" x1="64" x2="592" y1="250.0" y2="250.0"/>
+<text class="tick" x="56" y="254.0" text-anchor="end">0%</text>
+<line class="grid" x1="64" x2="592" y1="216.6" y2="216.6"/>
+<text class="tick" x="56" y="220.6" text-anchor="end">10%</text>
+<line class="grid" x1="64" x2="592" y1="183.1" y2="183.1"/>
+<text class="tick" x="56" y="187.1" text-anchor="end">20%</text>
+<line class="grid" x1="64" x2="592" y1="149.7" y2="149.7"/>
+<text class="tick" x="56" y="153.7" text-anchor="end">30%</text>
+<line class="grid" x1="64" x2="592" y1="116.3" y2="116.3"/>
+<text class="tick" x="56" y="120.3" text-anchor="end">40%</text>
+<line class="grid" x1="64" x2="592" y1="82.9" y2="82.9"/>
+<text class="tick" x="56" y="86.9" text-anchor="end">50%</text>
+<line class="grid" x1="64" x2="592" y1="49.4" y2="49.4"/>
+<text class="tick" x="56" y="53.4" text-anchor="end">60%</text>
+<line class="grid" x1="64" x2="592" y1="16.0" y2="16.0"/>
+<text class="tick" x="56" y="20.0" text-anchor="end">70%</text>
+<line class="axis" x1="64" x2="592" y1="250.0" y2="250.0"/>
+<path class="bar s2" d="M87.0,250.0 L87.0,175.4 Q87.0,171.4 91.0,171.4 L103.0,171.4 Q107.0,171.4 107.0,175.4 L107.0,250.0 Z"/>
+<path class="bar s1" d="M109.0,250.0 L109.0,57.4 Q109.0,53.4 113.0,53.4 L125.0,53.4 Q129.0,53.4 129.0,57.4 L129.0,250.0 Z"/>
+<text class="tick" x="108.0" y="268" text-anchor="middle">python</text>
+<text class="tick" x="108.0" y="281" text-anchor="middle" opacity="0.62">n=34</text>
+<text class="rowval" x="119.0" y="47.4" text-anchor="middle" style="font-size:10.5px">59</text>
+<path class="bar s2" d="M175.0,250.0 L175.0,241.3 Q175.0,237.3 179.0,237.3 L191.0,237.3 Q195.0,237.3 195.0,241.3 L195.0,250.0 Z"/>
+<path class="bar s1" d="M197.0,250.0 L197.0,61.1 Q197.0,57.1 201.0,57.1 L213.0,57.1 Q217.0,57.1 217.0,61.1 L217.0,250.0 Z"/>
+<text class="tick" x="196.0" y="268" text-anchor="middle">cpp</text>
+<text class="tick" x="196.0" y="281" text-anchor="middle" opacity="0.62">n=26</text>
+<text class="rowval" x="207.0" y="51.1" text-anchor="middle" style="font-size:10.5px">58</text>
+<path class="bar s2" d="M263.0,250.0 L263.0,199.5 Q263.0,195.5 267.0,195.5 L279.0,195.5 Q283.0,195.5 283.0,199.5 L283.0,250.0 Z"/>
+<path class="bar s1" d="M285.0,250.0 L285.0,69.8 Q285.0,65.8 289.0,65.8 L301.0,65.8 Q305.0,65.8 305.0,69.8 L305.0,250.0 Z"/>
+<text class="tick" x="284.0" y="268" text-anchor="middle">javascript</text>
+<text class="tick" x="284.0" y="281" text-anchor="middle" opacity="0.62">n=49</text>
+<text class="rowval" x="295.0" y="59.8" text-anchor="middle" style="font-size:10.5px">55</text>
+<path class="bar s2" d="M351.0,250.0 L351.0,232.6 Q351.0,228.6 355.0,228.6 L367.0,228.6 Q371.0,228.6 371.0,232.6 L371.0,250.0 Z"/>
+<path class="bar s1" d="M373.0,250.0 L373.0,97.6 Q373.0,93.6 377.0,93.6 L389.0,93.6 Q393.0,93.6 393.0,97.6 L393.0,250.0 Z"/>
+<text class="tick" x="372.0" y="268" text-anchor="middle">java</text>
+<text class="tick" x="372.0" y="281" text-anchor="middle" opacity="0.62">n=47</text>
+<text class="rowval" x="383.0" y="87.6" text-anchor="middle" style="font-size:10.5px">47</text>
+<path class="bar s2" d="M439.0,250.0 L439.0,192.5 Q439.0,188.5 443.0,188.5 L455.0,188.5 Q459.0,188.5 459.0,192.5 L459.0,250.0 Z"/>
+<path class="bar s1" d="M461.0,250.0 L461.0,104.6 Q461.0,100.6 465.0,100.6 L477.0,100.6 Q481.0,100.6 481.0,104.6 L481.0,250.0 Z"/>
+<text class="tick" x="460.0" y="268" text-anchor="middle">go</text>
+<text class="tick" x="460.0" y="281" text-anchor="middle" opacity="0.62">n=38</text>
+<text class="rowval" x="471.0" y="94.6" text-anchor="middle" style="font-size:10.5px">45</text>
+<path class="bar s2" d="M527.0,250.0 L527.0,243.0 Q527.0,239.0 531.0,239.0 L543.0,239.0 Q547.0,239.0 547.0,243.0 L547.0,250.0 Z"/>
+<path class="bar s1" d="M549.0,250.0 L549.0,164.7 Q549.0,160.7 553.0,160.7 L565.0,160.7 Q569.0,160.7 569.0,164.7 L569.0,250.0 Z"/>
+<text class="tick" x="548.0" y="268" text-anchor="middle">rust</text>
+<text class="tick" x="548.0" y="281" text-anchor="middle" opacity="0.62">n=30</text>
+<text class="rowval" x="559.0" y="154.7" text-anchor="middle" style="font-size:10.5px">27</text>
+<line class="key s2" x1="602" x2="614" y1="38" y2="38"/>
+<text class="endlbl" x="618" y="42">first attempt</text>
+<line class="key s1" x1="602" x2="614" y1="58" y2="58"/>
+<text class="endlbl" x="618" y="62">after test feedback</text>
+</svg>
+</figure>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Run</th><th>Cases</th><th>pass_1</th><th>pass_2</th><th>Well-formed</th><th>s/case</th></tr></thead>
+  <tbody>
+    <tr><td>Hand-driven harness</td><td class="n">224</td><td class="n">12.5%</td><td class="n">48.7%</td><td class="n">90.6%</td><td class="n">97</td></tr>
+    <tr><td>Framework, independent repeat</td><td class="n">225</td><td class="n">14.7%</td><td class="n">49.8%</td><td class="n">90.2%</td><td class="n">138</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <strong>The gap is the finding, not the score.</strong> Twenty-eight exercises were solved cold;
+  eighty-one more were solved only after the model saw failing test output &mdash; a
+  <strong>3.9&#215; improvement from feedback alone</strong>. For anything agentic, plumbing test output
+  back to the model matters more than any serving-configuration choice on this page.
+</div>
+
+<p>The two runs above are the same suite measured twice, and they disagree by 2.2 points on pass_1
+and by <em>13 points</em> on Rust (26.7% versus 40.0%, n=30). Both used greedy decoding at temperature
+zero, which is nominally deterministic &mdash; but at four concurrent threads, batch composition varies
+and reduction order flips near-tie tokens. <strong>Aggregate scores resolve to roughly &#177;2 points;
+per-language scores only to about &#177;10.</strong> Read the per-language bars as indicative.</p>
+
+<p>Three of the 225 cases (1.3%) failed for infrastructure reasons rather than model capability: one
+context exhaustion, one test timeout, and one HTTP 413 caused by an unset <code>client_max_body_size</code>
+on the reverse proxy. The remaining 24 malformed responses across 21 cases are genuine
+<code>diff</code>-format failures, concentrated in C++.</p>
+
+<h2>Agentic behaviour</h2>
+<p>Everything above is single-turn against a clean context. To reach the multi-turn regime, a coding
+agent built Tetris from scratch across 68 assistant turns, context growing 5.4K &rarr; 61.5K.</p>
+
+<figure class="fig">
+  <figcaption>Acceptance and decode speed versus accumulated context</figcaption>
+  <svg class="chart" viewBox="0 0 760 330" role="img" aria-labelledby="agx-t">
+<title id="agx-t">Draft acceptance and decode speed versus accumulated context</title>
+<line class="grid" x1="58" x2="610" y1="284.0" y2="284.0"/>
+<text class="tick" x="50" y="288.0" text-anchor="end">0</text>
+<line class="grid" x1="58" x2="610" y1="250.8" y2="250.8"/>
+<text class="tick" x="50" y="254.8" text-anchor="end">20</text>
+<line class="grid" x1="58" x2="610" y1="217.5" y2="217.5"/>
+<text class="tick" x="50" y="221.5" text-anchor="end">40</text>
+<line class="grid" x1="58" x2="610" y1="184.2" y2="184.2"/>
+<text class="tick" x="50" y="188.2" text-anchor="end">60</text>
+<line class="grid" x1="58" x2="610" y1="151.0" y2="151.0"/>
+<text class="tick" x="50" y="155.0" text-anchor="end">80</text>
+<line class="grid" x1="58" x2="610" y1="117.8" y2="117.8"/>
+<text class="tick" x="50" y="121.8" text-anchor="end">100</text>
+<line class="grid" x1="58" x2="610" y1="84.5" y2="84.5"/>
+<text class="tick" x="50" y="88.5" text-anchor="end">120</text>
+<line class="grid" x1="58" x2="610" y1="51.2" y2="51.2"/>
+<text class="tick" x="50" y="55.2" text-anchor="end">140</text>
+<line class="grid" x1="58" x2="610" y1="18.0" y2="18.0"/>
+<text class="tick" x="50" y="22.0" text-anchor="end">160</text>
+<text class="tick" x="93.4" y="302" text-anchor="middle">5K</text>
+<text class="tick" x="316.6" y="302" text-anchor="middle">15K</text>
+<text class="tick" x="420.3" y="302" text-anchor="middle">25K</text>
+<text class="tick" x="488.7" y="302" text-anchor="middle">35K</text>
+<text class="tick" x="539.7" y="302" text-anchor="middle">45K</text>
+<text class="tick" x="598.2" y="302" text-anchor="middle">60K</text>
+<line class="axis" x1="58" x2="610" y1="284.0" y2="284.0"/>
+<text class="axlbl" x="334" y="322" text-anchor="middle">accumulated context (band midpoint)</text>
+<path class="ln s1" d="M93.4,175.4 L316.6,162.1 L420.3,155.5 L488.7,163.8 L539.7,169.1 L598.2,170.1"/>
+<circle class="pt s1" cx="93.4" cy="175.4" r="4"/>
+<circle class="pt s1" cx="316.6" cy="162.1" r="4"/>
+<circle class="pt s1" cx="420.3" cy="155.5" r="4"/>
+<circle class="pt s1" cx="488.7" cy="163.8" r="4"/>
+<circle class="pt s1" cx="539.7" cy="169.1" r="4"/>
+<circle class="pt s1" cx="598.2" cy="170.1" r="4"/>
+<path class="ln s2" d="M93.4,55.7 L316.6,49.9 L420.3,55.9 L488.7,76.9 L539.7,94.8 L598.2,103.6"/>
+<circle class="pt s2" cx="93.4" cy="55.7" r="4"/>
+<circle class="pt s2" cx="316.6" cy="49.9" r="4"/>
+<circle class="pt s2" cx="420.3" cy="55.9" r="4"/>
+<circle class="pt s2" cx="488.7" cy="76.9" r="4"/>
+<circle class="pt s2" cx="539.7" cy="94.8" r="4"/>
+<circle class="pt s2" cx="598.2" cy="103.6" r="4"/>
+<line class="key s2" x1="620" x2="632" y1="103.6" y2="103.6"/>
+<text class="endlbl" x="636" y="107.6"><tspan class="val">108</tspan> decode tok/s</text>
+<line class="key s1" x1="620" x2="632" y1="170.1" y2="170.1"/>
+<text class="endlbl" x="636" y="174.1"><tspan class="val">68</tspan> acceptance %</text>
+</svg>
+</figure>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Context band</th><th>Turns</th><th>Acceptance</th><th>Decode tok/s</th><th>TTFT</th><th>Tokens/step</th></tr></thead>
+  <tbody>
+    <tr><td>0&ndash;10K</td><td class="n">7</td><td class="n">65.3%</td><td class="n">137.3</td><td class="n">5.9 s</td><td class="n">3.61</td></tr>
+    <tr><td>10&ndash;20K</td><td class="n">11</td><td class="n">73.3%</td><td class="n">140.8</td><td class="n">12.5 s</td><td class="n">3.93</td></tr>
+    <tr><td>20&ndash;30K</td><td class="n">5</td><td class="n">77.3%</td><td class="n">137.2</td><td class="n">22.2 s</td><td class="n">4.09</td></tr>
+    <tr><td>30&ndash;40K</td><td class="n">7</td><td class="n">72.3%</td><td class="n">124.6</td><td class="n">33.1 s</td><td class="n">3.89</td></tr>
+    <tr><td>40&ndash;50K</td><td class="n">16</td><td class="n">69.1%</td><td class="n">113.8</td><td class="n">48.6 s</td><td class="n">3.76</td></tr>
+    <tr><td>50&ndash;70K</td><td class="n">8</td><td class="n">68.5%</td><td class="n">108.5</td><td class="n">61.3 s</td><td class="n">3.74</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box">
+  <strong>Acceptance does not decay with context.</strong> We expected the 78&ndash;81% single-turn
+  repo-edit acceptance to collapse by turn 8 with 40K of history. It doesn&rsquo;t &mdash; the slope is
+  <strong>&minus;0.03 points per 1K tokens, r=&minus;0.05</strong>, i.e. flat. An independent
+  cross-check with a completely different agent harness reproduced it (&minus;0.063 pts/1K,
+  r=&minus;0.03). What degrades is attention cost over a growing KV cache, not speculation.
+  <strong>The instinctive fix &mdash; reducing draft depth &mdash; does nothing.</strong>
+</div>
+
+<p>A natural experiment confirms it: the agent compacted its context at turn 52, cutting 61.5K &rarr;
+30.4K. The twelve turns before averaged 70.8% acceptance and 113.1&nbsp;tok/s; after, 67.4% and 112.2.
+Freeing context bought nothing &mdash; exactly what you would predict if acceptance was never
+context-limited.</p>
+
+<h2>Why acceptance varies so much</h2>
+<p>Draft acceptance is the causal variable behind almost all of the tok/s spread on this page. It is
+determined by the <em>task</em>, far more than by the configuration.</p>
+
+<figure class="fig">
+  <figcaption>Draft acceptance by task type &#183; patched vLLM, MTP k=4</figcaption>
+  <svg class="chart" viewBox="0 0 760 314" role="img" aria-labelledby="bt-t">
+<title id="bt-t">Speculative draft acceptance by task type, MTP k=4</title>
+<line class="grid" x1="208.0" x2="208.0" y1="14" y2="274.0"/>
+<text class="tick" x="208.0" y="290.0" text-anchor="middle">0%</text>
+<line class="grid" x1="317.8" x2="317.8" y1="14" y2="274.0"/>
+<text class="tick" x="317.8" y="290.0" text-anchor="middle">20%</text>
+<line class="grid" x1="427.6" x2="427.6" y1="14" y2="274.0"/>
+<text class="tick" x="427.6" y="290.0" text-anchor="middle">40%</text>
+<line class="grid" x1="537.3" x2="537.3" y1="14" y2="274.0"/>
+<text class="tick" x="537.3" y="290.0" text-anchor="middle">60%</text>
+<line class="grid" x1="647.1" x2="647.1" y1="14" y2="274.0"/>
+<text class="tick" x="647.1" y="290.0" text-anchor="middle">80%</text>
+<text class="axlbl" x="455" y="308" text-anchor="middle">draft acceptance &#183; patched vLLM, MTP k=4</text>
+<path class="bar b-top" d="M208,18 L647.6,18 Q652.6,18 652.6,23 L652.6,33 Q652.6,38 647.6,38 L208,38 Z"/>
+<text class="rowlbl" x="196" y="32.0" text-anchor="end">Repo edit, 32K ctx</text>
+<text class="rowval b-top" x="660.6" y="32.0">81%</text>
+<path class="bar b-top" d="M208,47 L631.1,47 Q636.1,47 636.1,52 L636.1,62 Q636.1,67 631.1,67 L208,67 Z"/>
+<text class="rowlbl" x="196" y="61.0" text-anchor="end">Repo edit, 1K–8K</text>
+<text class="rowval b-top" x="644.1" y="61.0">78%</text>
+<path class="bar b-top" d="M208,76 L620.2,76 Q625.2,76 625.2,81 L625.2,91 Q625.2,96 620.2,96 L208,96 Z"/>
+<text class="rowlbl" x="196" y="90.0" text-anchor="end">Code review, 32K</text>
+<text class="rowval b-top" x="633.2" y="90.0">76%</text>
+<path class="bar b-mid" d="M208,105 L570.8,105 Q575.8,105 575.8,110 L575.8,120 Q575.8,125 570.8,125 L208,125 Z"/>
+<text class="rowlbl" x="196" y="119.0" text-anchor="end">Boilerplate CLI</text>
+<text class="rowval b-mid" x="583.8" y="119.0">67%</text>
+<path class="bar b-mid" d="M208,134 L537.8,134 Q542.8,134 542.8,139 L542.8,149 Q542.8,154 537.8,154 L208,154 Z"/>
+<text class="rowlbl" x="196" y="148.0" text-anchor="end">Canonical (π, fizzbuzz)</text>
+<text class="rowval b-mid" x="550.8" y="148.0">61%</text>
+<path class="bar b-mid" d="M208,163 L510.4,163 Q515.4,163 515.4,168 L515.4,178 Q515.4,183 510.4,183 L208,183 Z"/>
+<text class="rowlbl" x="196" y="177.0" text-anchor="end">Code review, 1K</text>
+<text class="rowval b-mid" x="523.4" y="177.0">56%</text>
+<path class="bar b-floor" d="M208,192 L499.4,192 Q504.4,192 504.4,197 L504.4,207 Q504.4,212 499.4,212 L208,212 Z"/>
+<text class="rowlbl" x="196" y="206.0" text-anchor="end">Summarize, 1K</text>
+<text class="rowval b-floor" x="512.4" y="206.0">54%</text>
+<path class="bar b-floor" d="M208,221 L488.4,221 Q493.4,221 493.4,226 L493.4,236 Q493.4,241 488.4,241 L208,241 Z"/>
+<text class="rowlbl" x="196" y="235.0" text-anchor="end">Summarize, 8K</text>
+<text class="rowval b-floor" x="501.4" y="235.0">52%</text>
+<path class="bar b-floor" d="M208,250 L444.5,250 Q449.5,250 449.5,255 L449.5,265 Q449.5,270 444.5,270 L208,270 Z"/>
+<text class="rowlbl" x="196" y="264.0" text-anchor="end">Summarize, 32K</text>
+<text class="rowval b-floor" x="457.5" y="264.0">44%</text>
+<line class="axis" x1="208" x2="208" y1="14" y2="274.0"/>
+</svg>
+</figure>
+
+<p>Repo edits accept highest &mdash; emitting a diff means reproducing code already in the context, and
+acceptance there <em>rises</em> with more surrounding code. Prose summarization is the floor. Computing
+&#960; was predicted to be the memorized ceiling and turned out to be near the bottom of the coding
+classes, because dense numeric code is not stereotyped boilerplate.</p>
+
+<figure class="fig">
+  <figcaption>Draft acceptance by position within the speculated block</figcaption>
+  <svg class="chart" viewBox="0 0 760 300" role="img" aria-labelledby="pos-t">
+<title id="pos-t">Draft acceptance by draft position, code versus prose</title>
+<line class="grid" x1="52" x2="554" y1="254.0" y2="254.0"/>
+<text class="tick" x="44" y="258.0" text-anchor="end">0%</text>
+<line class="grid" x1="52" x2="554" y1="194.5" y2="194.5"/>
+<text class="tick" x="44" y="198.5" text-anchor="end">25%</text>
+<line class="grid" x1="52" x2="554" y1="135.0" y2="135.0"/>
+<text class="tick" x="44" y="139.0" text-anchor="end">50%</text>
+<line class="grid" x1="52" x2="554" y1="75.5" y2="75.5"/>
+<text class="tick" x="44" y="79.5" text-anchor="end">75%</text>
+<line class="grid" x1="52" x2="554" y1="16.0" y2="16.0"/>
+<text class="tick" x="44" y="20.0" text-anchor="end">100%</text>
+<text class="tick" x="52.0" y="272" text-anchor="middle">0</text>
+<text class="tick" x="135.7" y="272" text-anchor="middle">1</text>
+<text class="tick" x="219.3" y="272" text-anchor="middle">2</text>
+<text class="tick" x="303.0" y="272" text-anchor="middle">3</text>
+<text class="tick" x="386.7" y="272" text-anchor="middle">4</text>
+<text class="tick" x="470.3" y="272" text-anchor="middle">5</text>
+<text class="tick" x="554.0" y="272" text-anchor="middle">6</text>
+<line class="axis" x1="52" x2="554" y1="254.0" y2="254.0"/>
+<text class="axlbl" x="303" y="292" text-anchor="middle">draft position (0 = first speculated token)</text>
+<path class="ln s1" d="M52.0,39.8 L135.7,61.2 L219.3,80.3 L303.0,89.8"/>
+<circle class="pt s1" cx="52.0" cy="39.8" r="4"/>
+<circle class="pt s1" cx="135.7" cy="61.2" r="4"/>
+<circle class="pt s1" cx="219.3" cy="80.3" r="4"/>
+<circle class="pt s1" cx="303.0" cy="89.8" r="4"/>
+<path class="ln s2" d="M52.0,63.6 L135.7,101.7 L219.3,156.4 L303.0,182.6"/>
+<circle class="pt s2" cx="52.0" cy="63.6" r="4"/>
+<circle class="pt s2" cx="135.7" cy="101.7" r="4"/>
+<circle class="pt s2" cx="219.3" cy="156.4" r="4"/>
+<circle class="pt s2" cx="303.0" cy="182.6" r="4"/>
+<path class="ln s3" d="M52.0,54.1 L135.7,58.8 L219.3,80.3 L303.0,85.0 L386.7,96.9 L470.3,113.6 L554.0,123.1"/>
+<circle class="pt s3" cx="52.0" cy="54.1" r="4"/>
+<circle class="pt s3" cx="135.7" cy="58.8" r="4"/>
+<circle class="pt s3" cx="219.3" cy="80.3" r="4"/>
+<circle class="pt s3" cx="303.0" cy="85.0" r="4"/>
+<circle class="pt s3" cx="386.7" cy="96.9" r="4"/>
+<circle class="pt s3" cx="470.3" cy="113.6" r="4"/>
+<circle class="pt s3" cx="554.0" cy="123.1" r="4"/>
+<path class="ln s4" d="M52.0,75.5 L135.7,113.6 L219.3,149.3 L303.0,163.6 L386.7,194.5 L470.3,206.4 L554.0,225.4"/>
+<circle class="pt s4" cx="52.0" cy="75.5" r="4"/>
+<circle class="pt s4" cx="135.7" cy="113.6" r="4"/>
+<circle class="pt s4" cx="219.3" cy="149.3" r="4"/>
+<circle class="pt s4" cx="303.0" cy="163.6" r="4"/>
+<circle class="pt s4" cx="386.7" cy="194.5" r="4"/>
+<circle class="pt s4" cx="470.3" cy="206.4" r="4"/>
+<circle class="pt s4" cx="554.0" cy="225.4" r="4"/>
+<line class="key s1" x1="564" x2="576" y1="89.8" y2="89.8"/>
+<text class="endlbl" x="580" y="93.8"><tspan class="val">69%</tspan> MTP k=4 · code</text>
+<line class="key s3" x1="564" x2="576" y1="123.1" y2="123.1"/>
+<text class="endlbl" x="580" y="127.1"><tspan class="val">55%</tspan> DFlash2 k=7 · code</text>
+<line class="key s2" x1="564" x2="576" y1="182.6" y2="182.6"/>
+<text class="endlbl" x="580" y="186.6"><tspan class="val">30%</tspan> MTP k=4 · prose</text>
+<line class="key s4" x1="564" x2="576" y1="225.4" y2="225.4"/>
+<text class="endlbl" x="580" y="229.4"><tspan class="val">12%</tspan> DFlash2 k=7 · prose</text>
+</svg>
+</figure>
+
+<p>Each speculated token is conditioned on the ones before it, so acceptance falls with draft depth
+&mdash; and <strong>the rate of that fall is task-dependent, not a property of the hardware</strong>. On a
+repo edit, DFlash2 still lands 55% of its seventh draft token, so deep drafting pays. On prose the
+same speculator collapses to 12%, meaning positions 5&ndash;7 are verify compute spent on tokens that
+will be discarded. This is the mechanism behind every optimal-draft-depth result in this study &mdash;
+and behind the earlier finding that n=4 beat a model card&rsquo;s recommended n=7, which was measured
+on prose.</p>
+
+<h2>Which numbers to trust</h2>
+<div class="tw">
+<table>
+  <thead><tr><th>Section</th><th>Verdict</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>Canonical single-GPU figures</td><td><span class="badge">clean</span></td><td>Single-tenant, mean of 5, supersedes all earlier speed numbers</td></tr>
+    <tr><td>Correctness &#183; both runs</td><td><span class="badge">clean</span></td><td>Correctness is contention-immune</td></tr>
+    <tr><td>Agentic profile &amp; cross-check</td><td><span class="badge">clean</span></td><td>Single-tenant throughout</td></tr>
+    <tr><td>Acceptance by task &amp; by position</td><td><span class="badge">clean</span></td><td>Sequential runs, one config at a time</td></tr>
+    <tr><td>Throughput, two-replica</td><td><span class="badge">clean</span></td><td>Both GPUs <em>is</em> the configuration</td></tr>
+    <tr><td>Context scaling &#8804;64K</td><td><span class="badge warn">mixed</span></td><td>vLLM and llama.cpp 1&#215;GPU curves contended; 2&#215;GPU clean</td></tr>
+    <tr><td>Beyond 64K</td><td><span class="badge warn">mixed</span></td><td>Only the KVarN row is clean; see the per-row column</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="foot">
+  <p><strong>Conditions.</strong> All figures: Qwen3.8-27B at 4-bit (AutoRound W4A16 &ldquo;fast&rdquo;
+  variant with int4 <code>lm_head</code>), 2&#215; RTX 3090 capped at 250&nbsp;W with persistence mode,
+  reasoning disabled via <code>chat_template_kwargs</code>, prompt caching off, greedy decoding at
+  temperature 0, 512-token completions unless stated.</p>
+  <p><strong>Not comparable to published leaderboards.</strong> Different quantization, different
+  harness versions, reasoning disabled and a different serving stack all move these numbers
+  independently. They are honest measurements of one deployment, not claims about the model&rsquo;s
+  capability. See <a href="method.html">Method</a> for the fairness contract, and
+  <a href="log.html">Log</a> for the full chronological record including the wrong turns.</p>
+</div>
+
+</main>
+</body>
+</html>

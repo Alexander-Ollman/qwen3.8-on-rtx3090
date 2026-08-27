@@ -1,0 +1,139 @@
+# Qwen3.8-27B — production stack: two GPU replicas + load balancer.
+#
+#   scripts/up.sh              bring everything up
+#   scripts/status.sh          health, GPU, current SPEC/CTX per replica
+#   scripts/ab-phase.sh phase1 crossover A/B (see README)
+#
+# Every knob lives in .env next to this file. Each replica is configured
+# INDEPENDENTLY (GPU0_SPEC/GPU0_CTX vs GPU1_SPEC/GPU1_CTX) so the A/B crossover
+# is an .env edit + `up.sh`, never a hand-edited docker run.
+name: qwen38
+
+x-replica: &replica
+  image: qwen38-27b-3090:latest
+  build:
+    context: ${REPO_DIR:-./qwen38-rtx3090}
+  ipc: host
+  command: single
+  restart: unless-stopped
+  stop_grace_period: 30s
+  volumes:
+    - ${REPO_DIR:-./qwen38-rtx3090}/models:/app/models
+    - qwen-cache:/cache
+  networks: [qwen]
+  # start_period is long on purpose: a COLD cache pays torch.compile + CUDA graph
+  # capture + FlashInfer JIT (~3 min, up to ~15 on a first-ever run). Warm it is ~60 s.
+  healthcheck:
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 900s
+
+services:
+  # Idempotent model prep — a no-op once models/ is populated (a few seconds).
+  # Kept as a dependency so a half-prepared model dir can never be served.
+  prepare:
+    image: qwen38-27b-3090:latest
+    build:
+      context: ${REPO_DIR:-./qwen38-rtx3090}
+    command: prepare
+    ipc: host
+    environment:
+      HOME: /cache
+    volumes:
+      - ${REPO_DIR:-./qwen38-rtx3090}/models:/app/models
+      - qwen-cache:/cache
+    networks: [qwen]
+
+  replica-gpu0:
+    <<: *replica
+    container_name: qwen38-gpu0
+    environment:
+      HOME: /cache
+      PORT: "18020"
+      VLLM_API_KEY: ${VLLM_API_KEY:?set VLLM_API_KEY in .env}
+      SPEC: ${GPU0_SPEC:-}
+      CTX: ${GPU0_CTX:-fast}
+      PREFIX_CACHE: ${GPU0_PREFIX_CACHE:-0}
+    ports:
+      - "18020:18020"          # direct access + telemetry scrape target
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18020/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 900s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+
+  replica-gpu1:
+    <<: *replica
+    container_name: qwen38-gpu1
+    environment:
+      HOME: /cache
+      PORT: "18021"
+      VLLM_API_KEY: ${VLLM_API_KEY:?set VLLM_API_KEY in .env}
+      SPEC: ${GPU1_SPEC:-}
+      CTX: ${GPU1_CTX:-fast}
+      PREFIX_CACHE: ${GPU1_PREFIX_CACHE:-0}
+    ports:
+      - "18021:18021"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18021/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 900s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+
+  # Load balancer. Reaches the replicas over the compose network by service name,
+  # so it does not depend on host port publishing. Round-robin, NOT least_conn —
+  # see nginx/qwen-lb.conf for why that matters to the A/B.
+  lb:
+    image: nginx:1.27-alpine
+    container_name: qwen38-lb
+    restart: unless-stopped
+    ports:
+      - "${LB_PORT:-18000}:18000"
+    volumes:
+      - ./nginx/qwen-lb.conf:/etc/nginx/nginx.conf:ro
+      - ./logs:/var/log/qwen
+    networks: [qwen]
+    depends_on:
+      - replica-gpu0
+      - replica-gpu1
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18000/lb-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+networks:
+  qwen:
+    name: qwen38-net
+
+volumes:
+  # EXTERNAL on purpose: this is the existing cache from the old stack, holding the
+  # torch.compile / Triton / FlashInfer JIT artifacts. Reusing it keeps cold starts
+  # near 60 s instead of several minutes. Do not let compose create a fresh one.
+  qwen-cache:
+    external: true
+    name: qwen38-rtx3090_qwen-cache
