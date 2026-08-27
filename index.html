@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Story · Qwen3.8-27B on RTX 3090</title>
+<title>How to run a 27B model on your own GPU · Qwen3.8-27B on RTX 3090</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
@@ -15,7 +15,7 @@
   <div class="tabs">
     <a href="index.html" aria-current="page">Story</a>
     <a href="results.html">Results</a>
-    <a href="method.html">Method</a>
+    <a href="lessons.html">Lessons</a>
     <a href="setup.html">Setup</a>
     <a href="log.html">Log</a>
   </div>
@@ -24,18 +24,68 @@
 
 <header class="hero">
   <p class="kicker">Field notes · 2× RTX 3090 · August 2026</p>
-  <h1>27 to 212 tokens a second</h1>
-  <p class="standfirst">Five days tuning one 27B model on consumer hardware. The model never changed. The serving software made it 7.7× faster — and along the way, four different things quietly lied to us about how fast it was going.</p>
+  <h1>How to Run a 27B Model on Your Own GPU — And What It Can Actually Do</h1>
+  <p class="standfirst">Qwen3.8-27B running at 212 tokens a second on a graphics card you can buy secondhand. Here is what that gets you, what it cost to get there, and whether it is worth your weekend.</p>
 </header>
 
-<p class="lede">We had two RTX 3090s and <strong>Qwen3.8-27B</strong>, a 27-billion-parameter hybrid-attention model, quantized to 4 bits. The question was simple: how fast can this actually go on hardware you can buy secondhand?</p>
+<p class="lede">A little under two years ago, running a 27-billion-parameter language model meant renting time on somebody else's datacenter and hoping the bill stayed reasonable. Today it means a used RTX 3090 — about the price of a decent secondhand motorbike — sitting under your desk, answering faster than you can read, with nothing you type ever leaving the building.</p>
 
-<p>The out-of-the-box answer was <strong>27.6 tokens per second</strong>. Install llama.cpp, point it at the model, pass one flag to put the layers on the GPU. It works, and it is slow enough to be annoying.</p>
+<p>That last part is the bit worth pausing on. Every prompt you send to a hosted model is a prompt you no longer control. Your half-finished code, the client's schema, the thing you were embarrassed to ask a colleague — all of it lands on somebody else's disk under somebody else's retention policy. Running the model yourself makes that question go away entirely.</p>
 
-<p>Five days later the same model on the same card was doing <strong>212.1</strong>. We had not quantized it further, swapped it for something smaller, or overclocked anything. Every one of those tokens came from the same 4-bit checkpoint.</p>
+<p>So: what do you actually get?</p>
+
+<h2>The short version</h2>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>What you get</th><th>On one RTX 3090</th><th>On two</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s</td><td class="n">212 tok/s</td></tr>
+      <tr><td><strong>Speed, whole team hammering it</strong></td><td class="n">960 tok/s<span class="sub">at 64 concurrent</span></td><td class="n">905 tok/s<span class="sub">at 16 concurrent, low latency</span></td></tr>
+      <tr><td><strong>How much it can read at once</strong></td><td class="n">64K tokens<span class="sub">192K if you accept ¼ speed</span></td><td class="n">64K per replica</td></tr>
+      <tr><td><strong>Real coding tasks solved</strong></td><td class="n">48.7%<span class="sub">Aider polyglot, 225 exercises</span></td><td class="n">same</td></tr>
+      <tr><td><strong>Power drawn</strong></td><td class="n">250 W</td><td class="n">500 W</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p>212 tokens a second is roughly <strong>ten times faster than you can read</strong>. In practice it means the model finishes a function before you have finished reading its first line — the latency stops being something you notice. 64,000 tokens of context is about 5,000 lines of code, or a couple of long documents, held in mind at once.</p>
+
+<p>And 48.7%? That one needs unpacking, because it is the number people get wrong.</p>
+
+<h2>What it can genuinely do — and what it can't</h2>
+
+<p>We ran the Aider polyglot benchmark against it: 225 real programming exercises across Python, JavaScript, Java, Go, C++ and Rust. Each one gets two attempts, with the failing test output shown after the first.</p>
+
+<p>It solved <strong>12.5% on the first attempt</strong>. Show it the failing tests, and that jumps to <strong>48.7%</strong>.</p>
+
+<div class="box">
+  <strong>That gap is the whole story of how to use this thing.</strong> Twenty-eight problems solved cold; eighty-one more solved once it could see what broke. The model is mediocre at guessing right first time and genuinely good at fixing what it can see is wrong. Point it at a codebase with a test suite and it will iterate its way to working code. Ask it to write something correct in one shot, with no feedback loop, and you will be disappointed roughly nine times in ten.
+</div>
+
+<p>So the honest framing is this: <strong>a very fast, very private pair-programmer that needs a feedback loop to be useful.</strong> Not a replacement for a frontier model on hard novel problems. Excellent at the enormous middle ground of software work — refactors, boilerplate, test-writing, "why is this failing", translating between languages, explaining unfamiliar code.</p>
+
+<p>It is also uneven by language. Python and C++ land around 58%, Rust around 27&ndash;40%. If you write Rust all day, temper expectations.</p>
+
+<h3>Concretely, what can you point it at?</h3>
+
+<ul>
+  <li><strong>A coding assistant in your editor.</strong> At 212 tok/s a single developer never waits. This is the use case the hardware is best suited to.</li>
+  <li><strong>A small team.</strong> Two cards behind a load balancer served 905 tok/s spread across 16 simultaneous requests — comfortably a handful of developers with a coding assistant each, all of it staying on your own network.</li>
+  <li><strong>Bulk work overnight.</strong> One card in batch mode hit 960 tok/s at 64 concurrent requests. Documentation passes, test generation, migrating a few hundred files — the sort of job you start before bed.</li>
+  <li><strong>Anything you cannot send to a hosted API.</strong> Client code under NDA, medical or legal text, an air-gapped network. This is where local models stop being a hobby and start being the only option.</li>
+</ul>
+
+<div class="box warn">
+  <strong>One caveat that will bite you at long context.</strong> The model reads a 61,000-token prompt in about <strong>69 seconds</strong> before it produces a single token. Generation is fast; <em>reading</em> is not, and it scales linearly with how much you give it. For chat and agent work, turn on prefix caching — it makes the second turn over the same document almost instant instead of another minute of waiting.
+</div>
+
+<h2>How we got from 27 to 212</h2>
+
+<p>Here is the part that surprised us. When we first installed this model the honest, out-of-the-box, follow-the-README answer was <strong>27.6 tokens a second</strong>. Perfectly usable. Also about an eighth of what the same card can do.</p>
 
 <figure class="fig">
-  <figcaption>The whole story in one chart</figcaption>
+  <figcaption>Same model, same card, same prompt — only the software changes</figcaption>
   <svg class="chart" viewBox="0 0 760 300" role="img" aria-labelledby="lad-t">
 <title id="lad-t">Decode speed by configuration, single RTX 3090, 1K-token prompt</title>
 <line class="grid" x1="268.0" x2="268.0" y1="16" y2="240.0"/>
@@ -72,121 +122,60 @@
 </svg>
 </figure>
 
-<p>What follows is how we got up that ladder, and — more usefully — the four times we thought we had a result and didn't.</p>
+<p>Nothing on that chart involves a different model, a smaller quantization, or an overclock. Every bar is the same 4-bit checkpoint answering the same question. The entire 7.7× is serving software.</p>
 
-<h2>Day one: we killed a GPU</h2>
+<h3>The single biggest lever: speculative decoding</h3>
 
-<p>The first real measurement run ended with a card falling off the PCIe bus. <code>nvidia-smi</code> reported <code>Xid 79</code> and then stopped reporting the GPU at all. A reset didn't help. Only a reboot brought it back.</p>
+<p>If you take one technical idea away, make it this one. A small, fast "drafter" guesses the next few tokens; the big model checks them all in a single pass. Guesses it accepts are effectively free.</p>
 
-<p>The obvious suspect was the software that had been running — a kernel autotuner hammering the card. The actual cause was electrical. Xid 79 on an RTX 3090 is the signature of a 12&nbsp;V rail brownout: the autotuner had been cycling the GPU between idle and full power hundreds of times in a few minutes, and the power supply couldn't track the transients.</p>
+<p>The clever part is that this is <em>mathematically exact</em> — rejected guesses are thrown away, so the model produces precisely the text it would have produced anyway. There is no quality trade to weigh up. It is simply faster. On our hardware it took the same engine from 32.8 to 85.6 tokens a second.</p>
 
-<pre><code>sudo nvidia-smi -pl 250    # cap each GPU at 250 W
-sudo nvidia-smi -pm 1      # persistence mode</code></pre>
+<p>Cool, right? It gets better.</p>
+
+<h3>Then: whose code runs the verification</h3>
+
+<p>We assumed the drafter was the interesting choice. It wasn't. What mattered far more was <em>which implementation</em> ran the verify step.</p>
+
+<p>A community fork of the exact same vLLM version — patched with a smarter attention kernel for the verification pass, a 4-bit output head, and a trimmed draft vocabulary — reached <strong>167.8 tok/s</strong> where the stock release reached 85.6. Nearly double, from patches that never touch the model weights. Swapping in an external block drafter took it to 212.1.</p>
+
+<p>We ran the identical drafter under two engines and got 60.7 tok/s in one and 212.1 in the other. If you are chasing speed, the engine deserves more of your attention than the drafter does.</p>
+
+<h3>And one thing to do before any of it</h3>
 
 <div class="box stop">
-  <strong>This is the first thing to do on a multi-3090 box.</strong> We later proved the diagnosis by deliberately re-running the exact workload that killed the card, after capping. Eight server starts, no recurrence. The cap costs about 14% on unassisted decode and nothing measurable on the optimized path — cheap insurance against a hard lockup mid-run.
+  <strong>Cap your GPUs to 250 W first.</strong> Our first serious benchmark run ended with a card falling off the PCIe bus — <code>Xid 79</code>, unrecoverable, reboot required. It was not a driver bug. It was a 12&nbsp;V rail brownout: the software had been cycling the GPU between idle and full power hundreds of times a minute and the power supply could not keep up. We proved it by re-running the exact workload after capping — eight starts, no recurrence. It costs about 14% on the slow path and nothing measurable on the fast one.
 </div>
 
-<h2>The lever that actually matters</h2>
+<pre><code>sudo nvidia-smi -pl 250    # per-GPU power limit, watts
+sudo nvidia-smi -pm 1      # persistence mode</code></pre>
 
-<p>Almost everything people tune — batch sizes, cache dtypes, thread counts — is worth single-digit percentages. One thing is worth <strong>double</strong>: speculative decoding.</p>
+<p>Both reset on reboot, so re-apply them before you start serving. The <a href="setup.html">Setup</a> tab walks through the whole thing, one rung at a time, with the commands that actually worked.</p>
 
-<p>The idea is that a small, fast drafter guesses the next few tokens and the big model verifies them all in one pass. Accepted guesses are free. And critically, the technique is <em>mathematically exact</em>: rejected drafts are discarded, so the model emits precisely the tokens it would have emitted anyway. There is no quality tradeoff to weigh. It is the rare optimization that is simply better.</p>
+<h2>Is it worth your weekend?</h2>
 
-<p>On our hardware it took stock vLLM from 32.8 to 85.6 tok/s. Same engine, same checkpoint, one config change.</p>
+<p>Depends what you want from it.</p>
 
-<h2>Where the other 2× came from</h2>
+<p>If you want <em>a fast private coding assistant</em> and you already own a 3090, then yes — and you can stop at rung two. Tuning llama.cpp with three extra flags gets you 42.6 tok/s in about twenty minutes with no Docker and no forks. That is a genuinely pleasant local assistant.</p>
 
-<p>Turning speculation on is the easy half. The surprise was how much the <em>implementation</em> of the verify step mattered.</p>
+<p>If you want <em>the 212</em>, you are signing up for a third-party fork of vLLM with real caveats: it hard-codes assumptions about how the model was quantized and refuses checkpoints that don't match. Wonderful when it fits your model, an afternoon of debugging when it doesn't.</p>
 
-<p>A community fork of the exact same vLLM version — patched with split-KV verify attention, a 4-bit output head, and a reduced draft vocabulary — reached <strong>167.8 tok/s</strong> where stock reached 85.6. Nearly 2× from patches that never touch the model.</p>
+<p>And if you want <em>to serve a team</em>, two cards and a load balancer is the shape that works — not splitting one model across both, which bought us only about 10%.</p>
 
-<div class="box">
-  <strong>The framework matters more than the drafter.</strong> We ran the identical DFlash2 drafter under two engines: 60.7 tok/s in llama.cpp, 212.1 in patched vLLM. People spend a lot of energy choosing drafters. The bigger win is in whose verify path you run it through.
-</div>
+<p>What we would not tell you is that this replaces a frontier model. It doesn't. What it does is sit close enough for most day-to-day software work, at zero marginal cost, on hardware you own, with none of your code leaving the room.</p>
 
-<h2>Four things that lied to us</h2>
+<h2>Where the rest of it lives</h2>
 
-<p>Every one of these produced numbers that looked completely reasonable. None raised an error. Together they cost more time than all the actual tuning.</p>
+<p>Five days of measurement went into that chart, and a fair amount of it was us being wrong in interesting ways — a benchmark that scored a model whose output it could not read, a day of results invalidated by two GPUs quietly interfering with each other, a correction we published that turned out to be a worse error than the thing it corrected.</p>
 
-<h3>1. The model was thinking, and we couldn't see it</h3>
-
-<p>Recent models emit reasoning tokens by default. If your server runs a reasoning parser, that text is extracted into a <em>separate</em> field — so a client expecting it inline receives <strong>an empty response, with HTTP 200 and a full token count</strong>.</p>
-
-<p>One benchmark ran to completion, scoring a model whose output it literally could not read. Disabling it took our error count from 10 to 0 and halved the time per case. This bit us <strong>five separate times across four different harnesses</strong>, and client-side flags like <code>--thinking off</code> were repeatedly silent no-ops. What works is sending <code>chat_template_kwargs: {"enable_thinking": false}</code> and then checking the response is non-empty.</p>
-
-<h3>2. The second GPU was not idle</h3>
-
-<p>We ran two benchmarks on two cards at once, reasoning that separate GPUs are independent. They aren't — they share PCIe, host memory bandwidth and CPU, and batch-1 decode is latency-sensitive.</p>
-
-<p>The same task measured <strong>95.8 tok/s alone and 58.0 with the other card busy</strong>. A 39% error, invisible in the output. It invalidated a full day of context-scaling results, which now carry a correction banner in the log.</p>
-
-<h3>3. Our correction was also wrong</h3>
-
-<p>Having found the contention bug, we went looking for more of it — and "found" a 20% error in the headline table. It wasn't there. We had compared a 46-token prompt against runs at 1,100 tokens.</p>
-
-<p>Speculative acceptance <em>rises</em> with context: a longer prefix of coherent text is easier to draft against. A clean control settles it — with speculation <strong>off</strong>, prompt length changes decode speed by 0.6%, which is to say not at all. Turn speculation on and the same engine gains 29–46% from prompt length alone.</p>
-
-<div class="box warn">
-  <strong>The lesson we kept re-learning.</strong> Any speed comparison across different prompt lengths is meaningless unless you also report acceptance. Prompt length is a condition, like power cap or batch size — and comparing across it silently is exactly the mistake we'd just written a checker to prevent.
-</div>
-
-<h3>4. Generated code hung the harness for an hour</h3>
-
-<p>A correctness benchmark stalled. Not crashed — stalled, with a <code>node</code> process at 99.9% CPU for 68 minutes. The model had written JavaScript with an infinite loop, and the harness had no per-test timeout. If you run model-written code unattended, impose your own.</p>
-
-<h2>What long context actually costs</h2>
-
-<p>We expected decode speed to fall off a cliff as context grew. It doesn't — it declines gently, about 21% across a full 64K window. What falls off a cliff is the wait before the <em>first</em> token: <strong>+1.14 seconds per 1,000 tokens of prompt</strong>, with a correlation of 1.00. It is the most perfectly linear thing we measured.</p>
-
-<p>At 61K context, a request waits <strong>69 seconds</strong> before producing anything — roughly six times the entire decode time of the reply it then produces. For long-context work the speculator is close to irrelevant, and prefix caching is the only lever worth pulling.</p>
-
-<div class="box">
-  <strong>A prediction we got wrong, in a useful direction.</strong> We expected draft acceptance to collapse as an agent's conversation history piled up — later turns being novel reasoning rather than reproduction. Across 68 turns of an agent building Tetris from scratch, context growing from 5K to 61K, <strong>acceptance stayed flat</strong>. We confirmed it with a second, unrelated agent harness. The slowdown at depth is attention cost over a growing cache, not speculation failing. That matters practically: the instinctive fix — reducing draft depth — does nothing at all.
-</div>
-
-<h2>Does any of it still work?</h2>
-
-<p>Speed is half a question. We ran the Aider polyglot benchmark — 225 real programming exercises across six languages, with a second attempt after seeing test failures.</p>
-
-<div class="stats">
-  <div class="stat"><div class="v">12.5<small>%</small></div><div class="l">solved cold</div></div>
-  <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">after test feedback</div></div>
-  <div class="stat"><div class="v">90.2<small>%</small></div><div class="l">well-formed edits</div></div>
-  <div class="stat"><div class="v">3.9<small>×</small></div><div class="l">feedback multiplier</div></div>
-</div>
-
-<p>Twenty-eight exercises were solved on the first try. Eighty-one more were solved only after the model saw its tests fail. <strong>The feedback loop is worth more than any serving configuration on this page.</strong> If you are building something agentic, wiring test output back to the model beats every optimization we spent five days finding.</p>
-
-<p>Note what <em>cannot</em> move that number: because speculative decoding is exact, swapping drafters cannot change a correctness score. If you ever see one change, your harness is broken — which makes a useful self-test.</p>
-
-<h2>What we built so the next model takes a day</h2>
-
-<p>By the end we had a pile of scripts and a lot of hard-won knowledge about how to measure wrong. So we turned it into an instrument: six axes (speed, throughput, context, correctness, agentic behaviour, efficiency), one config file per model, and a <strong>fairness fingerprint</strong> — eleven conditions hashed into every result, with the comparison tool refusing to put two results side by side when they don't match.</p>
-
-<p>That gate exists because of one number. When we deliberately ran a benchmark under wrong conditions, it reported <strong>171 tok/s against the correct 144</strong>. Bad conditions look <em>better</em>. Nobody remembers three days later which flags a number came from, so the tool remembers instead.</p>
-
-<h2>Where we ended up</h2>
-
-<div class="tw">
-  <table>
-    <thead><tr><th>Configuration</th><th>Single 3090</th><th>What it takes</th></tr></thead>
-    <tbody>
-      <tr><td>llama.cpp, out of the box</td><td class="n">27.6</td><td>one flag</td></tr>
-      <tr><td>llama.cpp, tuned</td><td class="n">42.6</td><td>flags only, same software</td></tr>
-      <tr><td>Stock vLLM + speculation</td><td class="n">85.6</td><td>a different engine</td></tr>
-      <tr><td>Patched vLLM + MTP</td><td class="n">167.8</td><td>a third-party fork</td></tr>
-      <tr class="hl"><td><strong>Patched vLLM + DFlash2</strong></td><td class="n"><strong>212.1</strong></td><td>fork + external drafter</td></tr>
-    </tbody>
-  </table>
-</div>
-
-<p>Two cards behind a load balancer reached <strong>905 tok/s</strong> aggregate at 16 concurrent requests; a single card in batch mode reached <strong>960</strong> at 64. And the model will hold <strong>192,000 tokens</strong> of context on one 24 GB card, if you accept a 4/2-bit KV cache and roughly a quarter of the speed.</p>
-
-<p>The <a href="results.html">Results</a> tab has every number and graph, with provenance on each. <a href="method.html">Method</a> covers how it was measured and how to avoid our mistakes. <a href="setup.html">Setup</a> has the configs to reproduce it. <a href="log.html">Log</a> is the unedited five-day record, corrections and dead ends included.</p>
+<ul>
+  <li><a href="results.html"><strong>Results</strong></a> — every number and graph, with provenance attached to each</li>
+  <li><a href="lessons.html"><strong>Lessons</strong></a> — the six ways this machine reported wrong numbers, and how to not repeat them</li>
+  <li><a href="setup.html"><strong>Setup</strong></a> — the commands, rung by rung</li>
+  <li><a href="log.html"><strong>Log</strong></a> — the unedited record, corrections and dead ends included</li>
+</ul>
 
 <div class="foot">
-  <p><strong>Honest limits.</strong> One model, one machine, one architecture family, mostly at 4-bit. The fastest configuration is a third-party fork whose optimizations are checkpoint-specific — it refuses outright to load checkpoints quantized at a different group size. None of these figures are comparable to published leaderboard numbers: different quantization, harness versions, reasoning settings and serving stacks all move them independently. They are honest measurements of one deployment, not claims about what the model can do.</p>
+  <p><strong>Honest limits.</strong> One model, one machine, one architecture family, mostly at 4-bit. The fastest configuration is a third-party fork whose optimizations are specific to how this checkpoint was quantized. None of these figures are comparable to published leaderboard numbers — different quantization, harness versions, reasoning settings and serving stacks all move them independently. They are honest measurements of one deployment, not claims about what the model can do in general.</p>
   <p>Predecessor write-up: <a href="https://alexander-ollman.github.io/qwen3.6-on-rtx3090/">Qwen3.6 on RTX 3090</a>. Corrections welcome — several findings here began as confident mistakes.</p>
 </div>
 
