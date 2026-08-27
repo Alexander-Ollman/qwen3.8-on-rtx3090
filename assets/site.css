@@ -59,6 +59,8 @@ body{margin:0;background:var(--bg);color:var(--ink);
   letter-spacing:.14em;text-transform:uppercase;color:var(--go);margin:0 0 .6rem}
 h1{font-family:'IBM Plex Mono',monospace;font-size:2.15rem;font-weight:700;
   letter-spacing:-.03em;line-height:1.14;margin:0 0 .7rem;text-wrap:balance}
+.subtitle{font-family:'IBM Plex Mono',monospace;font-size:1.02rem;font-weight:500;
+  color:var(--go);margin:-.35rem 0 .75rem;letter-spacing:-.01em;text-wrap:balance}
 .standfirst{font-size:1.07rem;color:var(--ink-2);margin:0;max-width:64ch}
 h2{font-family:'IBM Plex Mono',monospace;font-size:1.2rem;font-weight:600;letter-spacing:-.01em;
   margin:3rem 0 .5rem;padding-bottom:.45rem;border-bottom:1px solid var(--line);text-wrap:balance}

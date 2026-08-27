@@ -1,6 +1,6 @@
-# qwen3.8-on-rtx3090
+# The AI Frontier: No Datacenter Required
 
-Five days of measuring **Qwen3.8-27B** on consumer NVIDIA hardware (2× RTX 3090, 24 GB each, Ampere, no NVLink) — from the out-of-the-box install to a configuration **7.7× faster**, and the silent failure modes that produced confident wrong numbers along the way.
+**Running Qwen3.8-27B optimally on an RTX 3090.** Five days of measuring **Qwen3.8-27B** on consumer NVIDIA hardware (2× RTX 3090, 24 GB each, Ampere, no NVLink) — from the out-of-the-box install to a configuration **7.7× faster**, and the silent failure modes that produced confident wrong numbers along the way.
 
 **Read it:** https://alexander-ollman.github.io/qwen3.8-on-rtx3090/
 
