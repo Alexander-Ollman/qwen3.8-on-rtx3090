@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Running on Pi · Qwen3.8-27B on RTX 3090</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<nav class="topbar"><div class="topbar-in">
+  <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
+  <div class="tabs">
+    <a href="index.html">Story</a>
+    <a href="results.html">Results</a>
+    <a href="lessons.html">Lessons</a>
+    <a href="setup.html">Setup</a>
+    <a href="pi.html" aria-current="page">Running on Pi</a>
+    <a href="log.html">Log</a>
+  </div>
+</div></nav>
+<main class="wrap">
+<header class="hero">
+  <p class="kicker">Field check · Pi coding agent · 29 August 2026</p>
+  <h1>Running on Pi</h1>
+  <p class="standfirst">Everything else on this site measures the server. This page is the first time we sat on the other end of the wire and asked it to build something: a coding agent, one prompt, and a playable game of Tetris four minutes later. Including the one way it failed first.</p>
+</header>
+
+<p class="lede">Benchmarks tell you how fast the tokens come out. They do not tell you whether an agent pointed at this box actually ships working code. So we connected <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent">Pi</a> — a deliberately small coding agent whose whole prompt fits in about 2,000 tokens — to the 3090 server over Tailscale, and gave it a single instruction: build a complete, playable Tetris as one <code>index.html</code>, with controls, scoring, levels, a next-piece preview and a game-over screen.</p>
+
+<h2>Why Pi and not a bigger harness</h2>
+
+<p>Prompt size is the tax every agent pays on every turn, and on self-hosted hardware you feel it directly: reading the prompt is the slow part, not writing the answer. A heavyweight harness sends tens of thousands of tokens of system prompt and tool schemas before your request even starts. Pi sends a couple of thousand. Against a server you own, that difference is the difference between an agent that feels instant and one that spends its first minute reading its own instructions.</p>
+
+<p>Wiring it up is one provider entry in Pi's <code>models.json</code>:</p>
+
+<pre><code>"remote-qwen": {
+  "baseUrl": "http://&lt;server&gt;:9000/v1",
+  "api": "openai-completions",
+  "compat": { "supportsDeveloperRole": false, "supportsReasoningEffort": false },
+  "models": [{
+    "id": "qwen3.8-27b",
+    "reasoning": true,
+    "contextWindow": 65536,
+    "maxTokens": 57344
+  }]
+}</code></pre>
+
+<p>Those last two numbers took a failed run to get right. More on that in a moment.</p>
+
+<h2>What happened</h2>
+
+<div class="stats">
+  <div class="stat"><div class="v">1<small>prompt</small></div><div class="l">no follow-ups, no test feedback</div></div>
+  <div class="stat"><div class="v">~4<small>min</small></div><div class="l">prompt to finished file</div></div>
+  <div class="stat"><div class="v">17.7<small>KB</small></div><div class="l">single index.html, written once</div></div>
+  <div class="stat"><div class="v">2<small>tool calls</small></div><div class="l">one write, one self-check</div></div>
+</div>
+
+<p>The model thought for a while, wrote the entire 17.7&nbsp;KB file in a single tool call, and then did something we had not asked for: it extracted the <code>&lt;script&gt;</code> block from its own output and ran <code>node --check</code> on it to verify the syntax before reporting done. An agent that tests its own work, unprompted, on a card you bought secondhand.</p>
+
+<figure class="fig">
+  <figcaption>The result, untouched — first and only shot</figcaption>
+  <img src="assets/pi-tetris.png" alt="Screenshot of the Tetris game Qwen3.8-27B built in one shot: dark-themed board mid-game with score, level and lines panels, a next-piece preview showing an I-piece, and a controls legend" style="width:100%;height:auto;display:block;border-radius:6px">
+</figure>
+
+<p>And it is not a minimum-viable Tetris. Unasked, it added a 7-bag randomizer, DAS/ARR key auto-repeat, lock delay with capped resets, a ghost piece, wall kicks, WebAudio sound effects with a mute key, pause-on-blur, and floating score popups. The code itself is clean: a strict-mode IIFE, no globals, a delta-clamped animation loop.</p>
+
+<div class="box warn">
+  <strong>It is not flawless, and the flaw is instructive.</strong> The next-piece preview draws a piece that is then thrown away — <code>spawn()</code> pulls a fresh piece for both the board <em>and</em> the preview, so the preview never matches what you actually get. Thirty seconds of play reveals it. The model verified its syntax but never its behaviour: the same gap between <em>compiles</em> and <em>works</em> that the <a href="index.html">Aider numbers</a> point at from the other direction. Give it the bug report and a feedback loop and it is exactly the kind of thing it fixes well.
+</div>
+
+<h2>The failure that came first</h2>
+
+<p>The first attempt produced nothing at all. No file, no error, no output — the process simply ended.</p>
+
+<p>The session log showed why: the model emitted <strong>104,838 characters of chain-of-thought</strong> and hit its 32,768-token output cap while still reasoning — <code>stopReason: length</code>, before a single tool call. It spent its final tokens deliberating whether to also create a test file that nobody had asked for. All plan, no artifact, and from the outside it looked like nothing happened.</p>
+
+<div class="box stop">
+  <strong>The caveat, if you run an agent against this model.</strong> Reasoning and answer share one output budget, and this model will happily spend the whole budget reasoning. Two defences, use both: raise the client's <code>max_tokens</code> as far as the server allows — the cap here is <code>max_model_len&nbsp;=&nbsp;65536</code>, <em>total</em>, prompt and output combined, so we settled on 57,344 with headroom for the prompt — and turn thinking off or low for build tasks. Also be explicit that the agent must call its write tool. The successful run came from the same model, same settings, and a prompt that said so.
+</div>
+
+<h2>What this adds to the picture</h2>
+
+<p>The <a href="index.html">Story</a> page frames this model as a pair-programmer that needs a feedback loop, on the strength of 12.5% first-shot versus 48.7% with test feedback on Aider. This run is the anecdote that sits alongside those numbers: on a well-trodden problem it can one-shot something genuinely impressive — and still leave a behavioural bug that only running the thing would catch. The benchmark and the field test agree: wire it to a loop that executes what it writes.</p>
+
+<div class="foot">
+  <p><strong>Provenance.</strong> One run, one model, one prompt — an anecdote, not a benchmark. Client: Pi 0.84.2 (<code>@earendil-works/pi-coding-agent</code>) on a Mac over Tailscale. Server: the two-card stack described in <a href="setup.html">Setup</a>, vLLM fork 0.27.1, thinking level medium. The failed first run, the successful build and its tool calls are all in Pi's session logs; the game file was recovered byte-identical from the write-tool payload after a power cut, which is its own small argument for agents that log everything.</p>
+</div>
+
+</main>
+</body>
+</html>

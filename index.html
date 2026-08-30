@@ -17,6 +17,7 @@
     <a href="results.html">Results</a>
     <a href="lessons.html">Lessons</a>
     <a href="setup.html">Setup</a>
+    <a href="pi.html">Running on Pi</a>
     <a href="log.html">Log</a>
   </div>
 </div></nav>
@@ -67,6 +68,10 @@
 <p>So the honest framing is this: <strong>a very fast, very private pair-programmer that needs a feedback loop to be useful.</strong> Not a replacement for a frontier model on hard novel problems. Excellent at the enormous middle ground of software work — refactors, boilerplate, test-writing, "why is this failing", translating between languages, explaining unfamiliar code.</p>
 
 <p>It is also uneven by language. Python and C++ land around 58%, Rust around 27&ndash;40%. If you write Rust all day, temper expectations.</p>
+
+<div class="box">
+  <strong>Field check, 29 August:</strong> pointed the <a href="pi.html">Pi coding agent</a> at this box and it one-shotted a fully fledged, playable Tetris — 7-bag randomizer, ghost piece, sound and all — in about four minutes; the caveat is that its first attempt died silently by spending the entire output budget on reasoning before writing a single byte, so mind your <code>max_tokens</code>. The full account is on the <a href="pi.html">Running on Pi</a> tab.
+</div>
 
 <h3>Concretely, what can you point it at?</h3>
 
@@ -174,6 +179,7 @@ sudo nvidia-smi -pm 1      # persistence mode</code></pre>
   <li><a href="results.html"><strong>Results</strong></a> — every number and graph, with provenance attached to each</li>
   <li><a href="lessons.html"><strong>Lessons</strong></a> — the six ways this machine reported wrong numbers, and how to not repeat them</li>
   <li><a href="setup.html"><strong>Setup</strong></a> — the commands, rung by rung</li>
+  <li><a href="pi.html"><strong>Running on Pi</strong></a> — a coding agent on the other end of the wire, and what it built</li>
   <li><a href="log.html"><strong>Log</strong></a> — the unedited record, corrections and dead ends included</li>
 </ul>
 
