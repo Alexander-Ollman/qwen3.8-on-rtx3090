@@ -708,6 +708,48 @@ on prose.</p>
 </table>
 </div>
 
+
+<h2>Which speculator to serve: MTP vs DFlash2, both cards</h2>
+<p>Single-GPU DFlash2 is the fastest configuration we measured (212.1 tok/s). The obvious next question &mdash; run it on <em>both</em> replicas and get that speed plus concurrency &mdash; went unanswered for most of this study, and shipped in the control panel as an untested profile. This settles it.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Concurrent requests</th><th>balanced<span class="sub">MTP k=4, both replicas</span></th><th>fast-pair<span class="sub">DFlash2 k=7, both replicas</span></th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="n">123.1 <span class="sub">&plusmn;2.8</span></td><td class="n">129.2 <span class="sub">&plusmn;5.3</span></td><td>noise</td></tr>
+      <tr><td class="n">4</td><td class="n">327.0</td><td class="n">336.2</td><td>noise</td></tr>
+      <tr class="hl"><td class="n">8</td><td class="n"><strong>464.9</strong></td><td class="n">410.7</td><td>balanced +12%</td></tr>
+      <tr class="hl"><td class="n">16</td><td class="n"><strong>610.3</strong></td><td class="n">401.6</td><td>balanced +34%</td></tr>
+      <tr><td class="n">24</td><td class="n">432.5</td><td class="n">441.0</td><td>noise</td></tr>
+      <tr><td class="n">32</td><td class="n">443.5</td><td class="n">402.9</td><td>balanced +9%</td></tr>
+      <tr><td class="n">48</td><td class="n">401.7</td><td class="n">387.3</td><td>noise</td></tr>
+      <tr><td class="n">64</td><td class="n">348.6</td><td class="n">426.9</td><td>fast-pair +22%<sup>&dagger;</sup></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="sub" style="max-width:70ch">Aggregate tok/s through the load balancer, ~1K-token prompts, 512-token completions. C=1 is the mean of five with standard deviation; the rest are single runs.</p>
+
+<div class="box">
+  <strong>Keep MTP. DFlash2 on both cards is not the upgrade it looks like.</strong> At the concurrency that matters for a shared endpoint &mdash; eight to sixteen simultaneous requests, i.e. a handful of people with coding assistants &mdash; MTP delivers <strong>12&ndash;34% more throughput</strong>. DFlash2 saturates around 400&ndash;440 tok/s from C=8 onward and stops scaling entirely, while MTP keeps climbing.
+</div>
+
+<p>The mechanism is visible in the replicas' own counters. Under this load DFlash2 ran at <strong>46.9% draft acceptance</strong> against MTP's <strong>~76%</strong>. It proposes seven tokens per step and discards most of them, and that wasted verification work is precisely what a saturated GPU cannot spare. The same property that makes it excellent for one user &mdash; drafting deep and often being right &mdash; becomes a liability once the verify batches are already full.</p>
+
+<p>It also answers the other half of the question: <strong>pairing DFlash2 does not preserve its single-GPU advantage.</strong> At C=1 both configurations land near 125 tok/s through the load balancer, nowhere near the 212 a single dedicated GPU delivers. One request goes to one replica; the second card contributes nothing but its presence.</p>
+
+<div class="box">
+  <strong>No failure at any load.</strong> We pushed to C=64 expecting an out-of-memory kill, since DFlash2 keeps a separate drafter resident and leaves only ~1.6&nbsp;GB of headroom per card. It never came. Zero failed requests across every level, VRAM steady at 23.2&nbsp;GB, no Xid events. The configuration is <em>safe</em> &mdash; it simply is not faster.
+</div>
+
+<div class="box warn">
+  <sup>&dagger;</sup><strong>Why the high-concurrency rows are not trustworthy.</strong> Switching between these profiles requires recreating the replicas, so every cross-arm comparison crosses a server restart &mdash; and restart drift on this machine is worth 4&ndash;6%. C=1 through C=16 were measured within a single session and compare cleanly. C=24&ndash;64 for <code>balanced</code> were measured afterwards, so the C=64 result favouring <code>fast-pair</code> is unproven. <code>balanced</code> peaking at C=16 (610) and then falling at C=24 (432) is also non-monotonic in a way that suggests that 610 may itself be optimistic. The C=8 and C=16 gaps are large enough to survive the doubt; nothing else here is.
+</div>
+
+<div class="box warn">
+  <strong>An operational trap this surfaced.</strong> Recreating the replicas gives them new addresses on the Docker network, but nginx resolves its upstreams <em>once</em>, at config load. Every request returned <code>502 Bad Gateway</code> until the load balancer was restarted too. Any tooling that switches profiles must restart the balancer after recreating a replica, or the first switch will look like a total outage.
+</div>
+
+
 <div class="foot">
   <p><strong>Conditions.</strong> All figures: Qwen3.8-27B at 4-bit (AutoRound W4A16 &ldquo;fast&rdquo;
   variant with int4 <code>lm_head</code>), 2&#215; RTX 3090 capped at 250&nbsp;W with persistence mode,

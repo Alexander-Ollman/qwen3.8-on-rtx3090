@@ -146,6 +146,9 @@ docker compose --profile single up -d     # one or a few users
 </div>
 
 <h2>Rung 5 — two cards</h2>
+<div class="box warn">
+  <strong>Restart the load balancer whenever you recreate a replica.</strong> nginx resolves its upstream addresses once, at config load. Recreating a replica gives it a new address on the Docker network, and every request then returns <code>502 Bad Gateway</code> until the balancer is restarted as well &mdash; which looks like a total outage rather than a stale DNS cache. <code>docker restart qwen38-lb</code> fixes it.
+</div>
 
 <p><span class="badge">905.6 tok/s at 16 concurrent</span> &nbsp; <span class="badge">151 tok/s single-stream</span></p>
 

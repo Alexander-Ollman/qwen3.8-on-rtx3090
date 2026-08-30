@@ -72,7 +72,7 @@
 
 <ul>
   <li><strong>A coding assistant in your editor.</strong> At 212 tok/s a single developer never waits. This is the use case the hardware is best suited to.</li>
-  <li><strong>A small team.</strong> Two cards behind a load balancer served 905 tok/s spread across 16 simultaneous requests — comfortably a handful of developers with a coding assistant each, all of it staying on your own network.</li>
+  <li><strong>A small team.</strong> Two cards behind a load balancer served 610&ndash;905 tok/s spread across 16 simultaneous requests — comfortably a handful of developers with a coding assistant each, all of it staying on your own network.</li>
   <li><strong>Bulk work overnight.</strong> One card in batch mode hit 960 tok/s at 64 concurrent requests. Documentation passes, test generation, migrating a few hundred files — the sort of job you start before bed.</li>
   <li><strong>Anything you cannot send to a hosted API.</strong> Client code under NDA, medical or legal text, an air-gapped network. This is where local models stop being a hobby and start being the only option.</li>
 </ul>
@@ -140,6 +140,8 @@
 <p>A community fork of the exact same vLLM version — patched with a smarter attention kernel for the verification pass, a 4-bit output head, and a trimmed draft vocabulary — reached <strong>167.8 tok/s</strong> where the stock release reached 85.6. Nearly double, from patches that never touch the model weights. Swapping in an external block drafter took it to 212.1.</p>
 
 <p>We ran the identical drafter under two engines and got 60.7 tok/s in one and 212.1 in the other. If you are chasing speed, the engine deserves more of your attention than the drafter does.</p>
+
+<p>One caveat we only nailed down at the end: <strong>the drafter that wins for one person loses for a team.</strong> DFlash2 is the fastest thing here at C=1, but run it on both cards and serve eight or sixteen people and it falls 12&ndash;34% behind plain MTP &mdash; it drafts seven tokens a step, accepts under half of them, and that wasted checking is exactly what a busy GPU cannot afford. Fast for you, slower for everyone. The <a href="results.html">Results</a> tab has the full comparison.</p>
 
 <h3>And one thing to do before any of it</h3>
 
