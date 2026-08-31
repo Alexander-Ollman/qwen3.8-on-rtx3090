@@ -28,7 +28,7 @@
   <p class="standfirst">The complete record, in the order it happened &mdash; including the runs that were wrong, the corrections, and the one comparison that could not be made at all. Sections&nbsp;1&ndash;9 are prior research; 10&ndash;20 are measurements from this machine.</p>
 </header>
 <div class="box warn"><strong>Read section&nbsp;19 first if you plan to cite anything.</strong> Conditions changed across the five days &mdash; power cap, reasoning setting, prompt corpus, single-tenancy &mdash; and two tables in this document can look comparable without being so. Section&nbsp;19 is the provenance key; section&nbsp;20 holds the canonical numbers, and wins wherever an earlier section disagrees.</div>
-<nav class="toc-inline" aria-label="Sections"><p class="toc-title">The 24 sections</p><ol><li><a href="#quants">Weight Quantizations</a></li><li><a href="#gguf">GGUF Variants (llama.cpp / Ollama)</a></li><li><a href="#kv">KV Cache Quantization</a></li><li><a href="#mtp">MTP Speculative Decoding</a></li><li><a href="#frameworks">Serving Frameworks</a></li><li><a href="#strategies">Dual-3090 Deployment Strategies</a></li><li><a href="#perf">Published Performance Numbers</a></li><li><a href="#accuracy">Accuracy Deep-Dive</a></li><li><a href="#configs">Recommended Benchmark Configurations</a></li><li><a href="#measured">Measured Results</a></li><li><a href="#ctxscaling">Speed vs Context Length</a></li><li><a href="#coding">Coding Workloads, Measured Clean</a></li><li><a href="#agentic">Multi-Turn Agentic Profile</a></li><li><a href="#crosscheck">Independent Cross-Check</a></li><li><a href="#correctness">Correctness &mdash; Aider Polyglot</a></li><li><a href="#quantblock">A Comparison That Could Not Be Run</a></li><li><a href="#servinglayer">Choosing a Serving Layer for Comparison</a></li><li><a href="#reportcard">The Framework&rsquo;s First Report Card</a></li><li><a href="#provenance">Reading These Numbers</a></li><li><a href="#canonical">Canonical Numbers</a></li><li><a href="#ceiling">The 64K Ceiling Was a Default</a></li><li><a href="#tppp">Tensor and Pipeline Parallelism</a></li><li><a href="#faults">Two GPU Faults, One Broken Explanation</a></li><li><a href="#kvq">KV Quantization Is Not Free</a></li></ol></nav><!-- 1. Weight Quantizations -->
+<nav class="toc-inline" aria-label="Sections"><p class="toc-title">The 25 sections</p><ol><li><a href="#quants">Weight Quantizations</a></li><li><a href="#gguf">GGUF Variants (llama.cpp / Ollama)</a></li><li><a href="#kv">KV Cache Quantization</a></li><li><a href="#mtp">MTP Speculative Decoding</a></li><li><a href="#frameworks">Serving Frameworks</a></li><li><a href="#strategies">Dual-3090 Deployment Strategies</a></li><li><a href="#perf">Published Performance Numbers</a></li><li><a href="#accuracy">Accuracy Deep-Dive</a></li><li><a href="#configs">Recommended Benchmark Configurations</a></li><li><a href="#measured">Measured Results</a></li><li><a href="#ctxscaling">Speed vs Context Length</a></li><li><a href="#coding">Coding Workloads, Measured Clean</a></li><li><a href="#agentic">Multi-Turn Agentic Profile</a></li><li><a href="#crosscheck">Independent Cross-Check</a></li><li><a href="#correctness">Correctness &mdash; Aider Polyglot</a></li><li><a href="#quantblock">A Comparison That Could Not Be Run</a></li><li><a href="#servinglayer">Choosing a Serving Layer for Comparison</a></li><li><a href="#reportcard">The Framework&rsquo;s First Report Card</a></li><li><a href="#provenance">Reading These Numbers</a></li><li><a href="#canonical">Canonical Numbers</a></li><li><a href="#ceiling">The 64K Ceiling Was a Default</a></li><li><a href="#tppp">Tensor and Pipeline Parallelism</a></li><li><a href="#faults">Two GPU Faults, One Broken Explanation</a></li><li><a href="#kvq">KV Quantization Is Not Free</a></li><li><a href="#applied">Context Raised, Sub-4-bit Closed</a></li></ol></nav><!-- 1. Weight Quantizations -->
   <section class="section" id="quants">
     <h2>1. Weight Quantizations</h2>
     <p class="section-note">All formats available on HuggingFace for Qwen3.8-27B, ranked by accuracy. VRAM is weights-only; add 2&ndash;8 GB for KV cache depending on context length and cache dtype.</p>
@@ -2275,6 +2275,69 @@ bf16 falsely appeared non-deterministic. And a probe run concurrently with a ben
 variation flip near-ties, producing another false non-determinism result. Both produced
 plausible-looking wrong answers; both were fixed by pinning to one replica and running serially.</p>
 </section>
+
+
+<h2 id="applied">25. Context Raised to 85,000; Sub-4-bit Closed <span class="badge">31 AUG</span></h2>
+
+<p>Two pieces of work: bank the context headroom &sect;21 identified but never applied, and test the
+quantization survey&rsquo;s standing recommendation.</p>
+
+<h3>The concurrency trade was not necessary</h3>
+<p>&sect;21 measured a ~90,000-token ceiling and read the probe table as showing that extra context
+must be bought by cutting <code>max_num_seqs</code> from 8 to 4 to 2. Testing the alternatives first
+showed otherwise. At the launcher&rsquo;s default <code>gpu_util</code> of 0.93 the ceiling was
+already 79,488 &mdash; <strong>+21% free</strong>. Raising it to 0.96 lifted KV capacity to
+<strong>103,042 tokens</strong>, carrying 85,000 with <strong>all eight slots intact</strong>.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Check</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Near-limit request</td><td class="n">78,652-token prompt &rarr; correct completion, 86&nbsp;s</td></tr>
+    <tr><td><code>/v1/models</code>, LB and both replicas</td><td class="n">85,000</td></tr>
+    <tr><td>KV capacity per replica</td><td class="n">103,042</td></tr>
+    <tr><td>Decode at new setting</td><td class="n">148.5 &plusmn;0.1 tok/s</td></tr>
+    <tr><td>Control at old setting</td><td class="n">149.6 &plusmn;0.2 tok/s</td></tr>
+    <tr><td>Client guidance, max output</td><td class="n">57,344 &rarr; 76,808</td></tr>
+  </tbody>
+</table></div>
+
+<p><strong>+30% context at no concurrency cost and no measurable speed cost</strong> (0.7%, inside
+noise).</p>
+
+<div class="box stop">
+  <strong>The comparator was wrong, and it affects the headline numbers.</strong> The first reading
+  looked like &minus;11.5% against the 167.8 baseline. It is not the context change: a control at the
+  <em>original</em> settings with the second replica also resident reproduced ~149.6. So
+  <strong>167.8 and 212.1 describe a machine running one replica</strong>, and a resident idle
+  neighbour costs about <strong>11% single-stream</strong>. Both numbers are right for their
+  conditions; the deployed two-replica stack simply is not the machine the ladder was measured on.
+</div>
+
+<h3>~3.5-bit compressed-tensors: not feasible</h3>
+<p>The survey&rsquo;s recommendation was to quantize the model ourselves to ~3.5 bits in
+<code>compressed-tensors</code>, the only format the fast stack accepts &mdash; every published
+sub-4-bit build requires leaving it. Read from the running container, the blocker is upstream:</p>
+
+<pre><code>marlin_utils.py:56   return [scalar_types.uint4, scalar_types.uint4b8]
+marlin_utils.py:85   res = [scalar_types.uint4b8, scalar_types.uint8b128]
+compressed_tensors.py:504  is_weight_4_bits = weight_quant.num_bits == 4</code></pre>
+
+<p>Marlin supports <strong>4- and 8-bit weights only</strong>. <code>uint3b4</code> exists in the
+scalar-type registry but is absent from Marlin&rsquo;s supported list, and no <code>num_bits == 3</code>
+path exists in the quantization layer. A 3.5-bit checkpoint would be refused by the stack that was the
+entire reason for building it, so we stopped at the feasibility gate rather than spending a 56&nbsp;GB
+download and hours of calibration.</p>
+
+<div class="box">
+  <strong>Incidental correction: group-32 was never vLLM&rsquo;s fault.</strong>
+  <code>MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]</code>. The <code>cyankiwi</code> load
+  failure in &sect;16 was the syv-ai prep script&rsquo;s hard-coded <code>GROUP = 128</code>, not a
+  kernel limitation &mdash; so <code>prepare/_groupsize.py</code> targets the right thing, though it
+  is still unverified against a live serve.
+</div>
+
+<p>That leaves EXL3 (3.0&nbsp;bpw &asymp; 12.89&nbsp;GiB, implying ~150K context on one card) as the
+only remaining route to a smaller checkpoint, on a different serving stack, with MTP support unknown.</p>
 
 <div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>

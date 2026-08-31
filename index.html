@@ -42,16 +42,16 @@
   <table>
     <thead><tr><th>What you get</th><th>On one RTX 3090</th><th>On two</th></tr></thead>
     <tbody>
-      <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s</td><td class="n">212 tok/s</td></tr>
+      <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s<span class="sub">measured with one replica running</span></td><td class="n">212 tok/s<span class="sub">but ~11% less once both are resident</span></td></tr>
       <tr><td><strong>Speed, whole team hammering it</strong></td><td class="n">960 tok/s<span class="sub">at 64 concurrent</span></td><td class="n">905 tok/s<span class="sub">at 16 concurrent, low latency</span></td></tr>
-      <tr><td><strong>How much it can read at once</strong></td><td class="n">~90K tokens<span class="sub">150–200K if you accept a slower, lossy cache</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
+      <tr><td><strong>How much it can read at once</strong></td><td class="n">85K tokens<span class="sub">now the default; ~90K ceiling</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
       <tr><td><strong>Real coding tasks solved</strong></td><td class="n">48.7%<span class="sub">Aider polyglot, 225 exercises</span></td><td class="n">same</td></tr>
       <tr><td><strong>Power drawn</strong></td><td class="n">250 W</td><td class="n">500 W</td></tr>
     </tbody>
   </table>
 </div>
 
-<p>212 tokens a second is roughly <strong>ten times faster than you can read</strong>. In practice it means the model finishes a function before you have finished reading its first line — the latency stops being something you notice. 90,000 tokens of context is about 7,000 lines of code, or several long documents, held in mind at once.</p>
+<p>212 tokens a second is roughly <strong>ten times faster than you can read</strong>. In practice it means the model finishes a function before you have finished reading its first line — the latency stops being something you notice. 85,000 tokens of context is about 6,500 lines of code, or several long documents, held in mind at once.</p>
 
 <p>And 48.7%? That one needs unpacking, because it is the number people get wrong.</p>
 

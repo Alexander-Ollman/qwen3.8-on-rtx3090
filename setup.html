@@ -116,7 +116,9 @@ hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-Q4_K_XL.gguf
 
 <h2>Rung 4 — patched vLLM</h2>
 
-<p><span class="badge">167.8 tok/s (MTP)</span> &nbsp; <span class="badge">212.1 tok/s (DFlash2)</span> &nbsp; <span class="badge">22.4–22.7 GB VRAM</span></p>
+<p><span class="badge">167.8 tok/s (MTP)</span> &nbsp; <span class="badge">212.1 tok/s (DFlash2)</span> &nbsp; <span class="badge">22.4–22.7 GB VRAM</span> &nbsp; <span class="badge warn">single replica</span></p>
+
+<p class="sub" style="max-width:70ch">Those two speeds were measured with the second replica stopped. Running two replicas behind a load balancer &mdash; rung&nbsp;5 &mdash; costs about <strong>11% single-stream</strong> just for the neighbour being resident: the same MTP config measures ~149.6 there. Budget for it if you are serving a team.</p>
 
 <p>The largest remaining gain comes from <a href="https://github.com/syv-ai/qwen38-27b-rtx3090">syv-ai/qwen38-27b-rtx3090</a>, a third-party fork of vLLM 0.27.1 carrying fourteen patches. They target the <em>verify</em> step, which is where speculative decoding actually spends its time: split-KV verify attention, an int4-requantized <code>lm_head</code> and drafter, and a 40k-token draft vocabulary covering what the model actually emits.</p>
 
@@ -150,11 +152,16 @@ docker compose --profile single up -d     # one or a few users
   <strong>The 65,536 default is not a limit.</strong> The launcher reads
   <code>MAX_LEN=${MAX_LEN:-65536}</code> &mdash; an overridable variable, and for a long time we
   mistook it for a hardware ceiling. The server was reporting <code>GPU KV cache size: 89,437
-  tokens</code> at those settings the whole time. Verified working: <code>MAX_LEN=85000</code> with
-  <code>GPU_UTIL=0.96</code> and <code>MAX_SEQS=4</code>; <code>MAX_LEN=90000</code> at
+  tokens</code> at those settings the whole time. <strong>85,000 is now the shipped default.</strong>
+  Verified working: <code>MAX_LEN=85000</code> with
+  <code>GPU_UTIL=0.96</code> and <code>MAX_SEQS</code> left at 8; <code>MAX_LEN=90000</code> at
   <code>0.97</code> and <code>2</code>. Above roughly 90,000 vLLM refuses at load and tells you the
-  arithmetic. The trade is concurrency: more context means fewer sequence slots.
-  <pre><code>MAX_LEN=85000 GPU_UTIL=0.96 MAX_SEQS=4 ./up.sh --wait</code></pre>
+  arithmetic. <strong>We assumed the extra context had to be bought by cutting sequence slots. It
+  doesn&rsquo;t</strong> &mdash; raising <code>GPU_UTIL</code> to 0.96 lifts KV capacity to 103,042
+  tokens, which carries 85,000 with all eight slots intact and <strong>no measurable speed
+  cost</strong> (148.5&nbsp;&plusmn;0.1 against a 149.6&nbsp;&plusmn;0.2 control). Only past ~90,000
+  does concurrency have to give.
+  <pre><code>MAX_LEN=85000 GPU_UTIL=0.96 ./up.sh --wait   # MAX_SEQS stays at 8</code></pre>
 </div>
 
 <div class="box stop">

@@ -96,9 +96,23 @@ the same 4-bit checkpoint &mdash; nothing was quantized further between the bott
 runs</strong> with standard deviations. 512-token greedy completions, reasoning disabled, 250&nbsp;W
 power cap. <strong>Where an earlier section of this study disagrees, these win.</strong></p>
 
+<div class="box stop">
+  <strong>Comparator correction (31 August) &mdash; read these as single-replica figures.</strong>
+  Every number in this table was measured with <em>the other replica stopped</em>. On the deployed
+  two-replica stack the <em>same configuration</em> measures <strong>~149.6&nbsp;tok/s</strong>, not
+  167.8: <strong>a resident idle neighbour costs roughly 11% single-stream</strong>. We found this
+  while checking whether raising the context default had cost speed &mdash; a control at the
+  <em>original</em> settings with the second replica also resident reproduced 149.6, which ruled out
+  the context change and left the deployment shape as the cause.
+  <br><br>
+  The figures below are not wrong; they are correct <em>for a machine serving one replica</em>. But
+  if you are running two replicas behind a load balancer, expect about 11% less single-stream than
+  this table advertises. Which condition a number belongs to is part of the number.
+</div>
+
 <div class="tw">
 <table>
-  <thead><tr><th>Configuration</th><th>~1K prompt</th><th>~55 prompt</th><th>Acceptance</th><th>Tokens/step</th><th>TTFT</th><th>Peak VRAM</th></tr></thead>
+  <thead><tr><th>Configuration<span class="sub">single replica, other card idle</span></th><th>~1K prompt</th><th>~55 prompt</th><th>Acceptance</th><th>Tokens/step</th><th>TTFT</th><th>Peak VRAM</th></tr></thead>
   <tbody>
     <tr class="hl"><td><strong>Patched vLLM + DFlash2 k=7</strong></td><td class="n">212.1 <span class="sub">&#177;1.25</span></td><td class="n">145.7 <span class="sub">&#177;1.49</span></td><td class="n">0.661</td><td class="n">5.63</td><td class="n">0.88 s</td><td class="n">22,973</td></tr>
     <tr><td><strong>Patched vLLM + MTP k=4</strong></td><td class="n">167.8 <span class="sub">&#177;0.73</span></td><td class="n">129.8 <span class="sub">&#177;1.30</span></td><td class="n">0.764</td><td class="n">5.29</td><td class="n">0.88 s</td><td class="n">23,217</td></tr>
@@ -179,6 +193,7 @@ largely contention-insensitive and the two agree within 6%.</p>
     <tr><td class="n">65,536</td><td class="n">0.93</td><td class="n">8</td><td class="n">89,437</td><td>the old default</td></tr>
     <tr class="hl"><td class="n">85,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">90,212</td><td><span class="badge">loads &amp; serves</span></td></tr>
     <tr class="hl"><td class="n">90,000</td><td class="n">0.97</td><td class="n">2</td><td class="n">93,616</td><td><span class="badge">loads &amp; serves</span></td></tr>
+    <tr class="hl"><td class="n"><strong>85,000</strong></td><td class="n">0.96</td><td class="n"><strong>8</strong></td><td class="n"><strong>103,042</strong></td><td><span class="badge">APPLIED &mdash; now live</span></td></tr>
     <tr><td class="n">110,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">&mdash;</td><td><span class="badge stop">refused</span></td></tr>
   </tbody>
 </table>
@@ -190,8 +205,27 @@ right behaviour is to surface that message, not to pre-emptively refuse. KV scal
 <strong>13,700 tokens per GiB</strong> on this model, which is unusually generous because only 16 of
 its 64 layers hold attention KV; the other 48 use fixed-size GDN recurrent state.</p>
 
-<p><strong>The real single-card bf16 ceiling is ~90,000</strong>, and the trade is explicit in the
-table: more context costs concurrency, as <code>max_num_seqs</code> falls 8&nbsp;&rarr;&nbsp;4&nbsp;&rarr;&nbsp;2.</p>
+<p><strong>The real single-card bf16 ceiling is ~90,000.</strong> Reading the middle rows of that
+table, we concluded more context had to be bought by cutting concurrency &mdash;
+<code>max_num_seqs</code> falling 8&nbsp;&rarr;&nbsp;4&nbsp;&rarr;&nbsp;2.</p>
+
+<div class="box">
+  <strong>Correction (31 August) &mdash; the concurrency trade was not necessary.</strong> We assumed
+  the extra context had to come out of <code>max_num_seqs</code>. It didn&rsquo;t. Raising
+  <code>gpu_util</code> from the launcher&rsquo;s 0.93 to 0.96 lifts KV capacity to
+  <strong>103,042 tokens</strong>, which carries 85,000 with <strong>all eight concurrency slots
+  intact</strong>. Even the untouched 0.93 config had a ceiling of 79,488 &mdash; <strong>+21%
+  available for free</strong> before anything was tuned. The earlier reading mistook a knob we had
+  happened to turn for a constraint we had to accept.
+</div>
+
+<p><strong>85,000 is now applied and live</strong> on both replicas, verified by serving rather than
+merely loading: a <strong>78,652-token prompt</strong> returned a correct completion in 86&nbsp;s, and
+<code>/v1/models</code> reports 85,000 on the load balancer and both replicas.
+<strong>The speed cost is nil</strong> &mdash; 148.5&nbsp;&plusmn;0.1&nbsp;tok/s at the new setting
+against a 149.6&nbsp;&plusmn;0.2 control at the old one, a 0.7% difference well inside noise. The
+panel&rsquo;s derived client guidance moved with it: max output at an 8K prompt reservation rose from
+<strong>57,344 to 76,808</strong>.</p>
 
 <h2>Context scaling to 64K</h2>
 <div class="box warn">
@@ -900,6 +934,42 @@ tok/s against the patched stack&rsquo;s 167.8 &mdash; roughly <strong>4&times; t
 <div class="box">
   <strong>Minor correction.</strong> This study previously listed UD-Q4_K_XL at 17.92&nbsp;GB. The
   repository manifest gives <strong>17.56&nbsp;GB</strong>.
+</div>
+
+<h2 id="subfourbit">Sub-4-bit on the fast stack is closed</h2>
+<p>Weights and KV cache compete for the same 24&nbsp;GB, and KV scales at ~13,700 tokens per GiB, so
+every GiB shaved off the weights buys roughly 13,700 tokens of context <em>at full bf16 fidelity and
+full speed</em>. Our weights are ~17.5&nbsp;GiB. That arithmetic makes a smaller checkpoint the most
+attractive remaining route to more context &mdash; and it is why we looked at quantizing the model
+ourselves to ~3.5&nbsp;bits in <code>compressed-tensors</code> format, the only format the fast stack
+accepts.</p>
+
+<div class="box stop">
+  <strong>It cannot work, and the blocker is upstream of any effort we could make.</strong>
+  vLLM&rsquo;s Marlin kernel supports <strong>4-bit and 8-bit weights only</strong>. Read from the
+  running container: <code>marlin_utils.py</code> returns <code>uint4</code> / <code>uint4b8</code> /
+  <code>uint8b128</code>, and there is no <code>num_bits == 3</code> path anywhere in the
+  quantization layer. <code>uint3b4</code> exists in the scalar-type registry but is absent from
+  Marlin&rsquo;s supported list. A 3.5-bit <code>compressed-tensors</code> checkpoint would be
+  <em>refused by the stack that was the entire reason for making it</em> &mdash; so we stopped at the
+  feasibility gate rather than spending a 56&nbsp;GB download and hours of calibration to produce a
+  file nothing here can load.
+</div>
+
+<p>That leaves <strong>EXL3</strong> (3.0&nbsp;bpw &asymp; 12.89&nbsp;GiB, which would imply roughly
+150K of context on one card) as the only remaining route to a smaller checkpoint &mdash; and it
+requires leaving the fast stack for ExLlamaV3. Whether that stack supports MTP speculative decoding
+on this GDN hybrid is <strong>unknown</strong>, and worth settling before committing to a 15&nbsp;GB
+download: without speculation it would hit precisely the wall llama.cpp did.</p>
+
+<div class="box">
+  <strong>Correction &mdash; group-32 was never vLLM&rsquo;s fault.</strong> Earlier we recorded a
+  group-32 checkpoint (<code>cyankiwi</code>) failing to load, and treated the group size as the
+  obstacle. Inspecting the running container gives
+  <code>MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]</code> &mdash; <strong>vLLM supports group-32
+  perfectly well</strong>. The failure was the syv-ai prep script&rsquo;s hard-coded
+  <code>GROUP = 128</code>, not a kernel limitation. Our <code>prepare/_groupsize.py</code> fix is
+  therefore aimed at the right target, though it remains unverified against a live serve.
 </div>
 
 <div class="foot">

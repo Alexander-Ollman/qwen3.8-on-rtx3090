@@ -30,7 +30,7 @@
 
 <p class="lede">Every finding on this site came from a machine where a benchmark can be wrong in at least six ways without anything failing. No exception was thrown, no HTTP error returned, no log line printed. In each case the number looked entirely reasonable. That is the hazard: a broken measurement does not announce itself, it just quietly reads a bit high or a bit low, and you publish it.</p>
 
-<h2>Eight ways to measure the wrong thing</h2>
+<h2>Nine ways to measure the wrong thing</h2>
 <p>Each of these cost real time here. They are ordered by how much damage they did.</p>
 
 <div class="box warn">
@@ -72,6 +72,18 @@
   flip. Nothing was broken and nothing was non-deterministic &mdash; the two jobs were simply sharing
   a batch. Serial execution fixed it. This is trap&nbsp;2&rsquo;s cousin: it is not only <em>other
   GPUs</em> that contaminate a measurement, but other requests on the same one.
+</div>
+
+<div class="box warn">
+  <strong>9. Benchmarking a machine in a different shape than you deploy it.</strong> Our headline
+  ladder &mdash; 167.8&nbsp;tok/s for MTP, 212.1 for DFlash2 &mdash; was measured with <em>the second
+  replica stopped</em>, because that isolates the configuration under test. The deployed stack runs
+  two replicas. Running the <em>same</em> configuration with the neighbour resident measures
+  <strong>~149.6&nbsp;tok/s: an 11% tax simply for the other model being loaded</strong>, before it
+  serves a single request. We found it by accident, while checking whether raising the context
+  default had cost speed &mdash; a control at the original settings reproduced 149.6 and cleared the
+  context change of blame. Both figures are correct; they describe different machines. Publishing
+  only the flattering one would have overstated what the deployment delivers by a ninth.
 </div>
 
 <h2>Know your noise floor &mdash; it is three different numbers</h2>
