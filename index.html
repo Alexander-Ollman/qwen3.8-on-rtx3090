@@ -44,14 +44,14 @@
     <tbody>
       <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s</td><td class="n">212 tok/s</td></tr>
       <tr><td><strong>Speed, whole team hammering it</strong></td><td class="n">960 tok/s<span class="sub">at 64 concurrent</span></td><td class="n">905 tok/s<span class="sub">at 16 concurrent, low latency</span></td></tr>
-      <tr><td><strong>How much it can read at once</strong></td><td class="n">64K tokens<span class="sub">192K if you accept ¼ speed</span></td><td class="n">64K per replica</td></tr>
+      <tr><td><strong>How much it can read at once</strong></td><td class="n">~90K tokens<span class="sub">150–200K if you accept a slower, lossy cache</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
       <tr><td><strong>Real coding tasks solved</strong></td><td class="n">48.7%<span class="sub">Aider polyglot, 225 exercises</span></td><td class="n">same</td></tr>
       <tr><td><strong>Power drawn</strong></td><td class="n">250 W</td><td class="n">500 W</td></tr>
     </tbody>
   </table>
 </div>
 
-<p>212 tokens a second is roughly <strong>ten times faster than you can read</strong>. In practice it means the model finishes a function before you have finished reading its first line — the latency stops being something you notice. 64,000 tokens of context is about 5,000 lines of code, or a couple of long documents, held in mind at once.</p>
+<p>212 tokens a second is roughly <strong>ten times faster than you can read</strong>. In practice it means the model finishes a function before you have finished reading its first line — the latency stops being something you notice. 90,000 tokens of context is about 7,000 lines of code, or several long documents, held in mind at once.</p>
 
 <p>And 48.7%? That one needs unpacking, because it is the number people get wrong.</p>
 
@@ -84,6 +84,10 @@
 
 <div class="box warn">
   <strong>One caveat that will bite you at long context.</strong> The model reads a 61,000-token prompt in about <strong>69 seconds</strong> before it produces a single token. Generation is fast; <em>reading</em> is not, and it scales linearly with how much you give it. For chat and agent work, turn on prefix caching — it makes the second turn over the same document almost instant instead of another minute of waiting.
+</div>
+
+<div class="box warn">
+  <strong>And do not reach for a quantized KV cache to buy context.</strong> It is the obvious move and it is a worse trade than it looks: fp8 measured <strong>22% slower</strong> than plain bf16, not faster, and both quantized caches we tested changed the model&rsquo;s output within the first couple of hundred characters. They are for context you cannot otherwise fit, not for speed.
 </div>
 
 <h2>How we got from 27 to 212</h2>
@@ -151,7 +155,11 @@
 <h3>And one thing to do before any of it</h3>
 
 <div class="box stop">
-  <strong>Cap your GPUs to 250 W first.</strong> Our first serious benchmark run ended with a card falling off the PCIe bus — <code>Xid 79</code>, unrecoverable, reboot required. It was not a driver bug. It was a 12&nbsp;V rail brownout: the software had been cycling the GPU between idle and full power hundreds of times a minute and the power supply could not keep up. We proved it by re-running the exact workload after capping — eight starts, no recurrence. It costs about 14% on the slow path and nothing measurable on the fast one.
+  <strong>Cap your GPUs to 250 W first.</strong> Our first serious benchmark run ended with a card falling off the PCIe bus — <code>Xid 79</code>, unrecoverable, reboot required. Capping to 250&nbsp;W and re-running the exact trigger eight times produced no recurrence, and it costs about 14% on the slow path and nothing measurable on the fast one. Do it.
+</div>
+
+<div class="box warn">
+  <strong>But we called that solved too early.</strong> The same card died again a week later — with both GPUs verified at 250&nbsp;W. Xid&nbsp;79 with no PCIe error logged is consistent with either a power transient or a link fault, and our logs cannot tell them apart. A cap bounds <em>average</em> draw, not microsecond spikes. The second failure happened under tensor parallelism, the one workload that makes both cards peak simultaneously rather than taking turns. The <a href="lessons.html">Lessons</a> tab has the full forensics, including the discovery that our two cards are wired to completely different buses.
 </div>
 
 <pre><code>sudo nvidia-smi -pl 250    # per-GPU power limit, watts
@@ -167,7 +175,7 @@ sudo nvidia-smi -pm 1      # persistence mode</code></pre>
 
 <p>If you want <em>the 212</em>, you are signing up for a third-party fork of vLLM with real caveats: it hard-codes assumptions about how the model was quantized and refuses checkpoints that don't match. Wonderful when it fits your model, an afternoon of debugging when it doesn't.</p>
 
-<p>And if you want <em>to serve a team</em>, two cards and a load balancer is the shape that works — not splitting one model across both, which bought us only about 10%.</p>
+<p>And if you want <em>to serve a team</em>, two cards and a load balancer is the shape that works — not splitting one model across both, which cost us 29% of single-stream speed and 62% of throughput on this machine. Splitting is worth it for exactly one thing: it reaches the model&rsquo;s full 262,000-token window, which nothing on a single card can.</p>
 
 <p>What we would not tell you is that this replaces a frontier model. It doesn't. What it does is sit close enough for most day-to-day software work, at zero marginal cost, on hardware you own, with none of your code leaving the room.</p>
 

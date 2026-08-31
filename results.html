@@ -35,7 +35,7 @@
   <div class="stat"><div class="v">212.1<small>tok/s</small></div><div class="l">best single-stream</div></div>
   <div class="stat"><div class="v">7.7<small>&#215;</small></div><div class="l">tuning ladder span</div></div>
   <div class="stat"><div class="v">959.8<small>tok/s</small></div><div class="l">one GPU at C=64</div></div>
-  <div class="stat"><div class="v">192<small>K</small></div><div class="l">deepest context served</div></div>
+  <div class="stat"><div class="v">204<small>K</small></div><div class="l">deepest context served</div></div>
   <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">Aider polyglot pass_2</div></div>
 </div>
 
@@ -161,6 +161,37 @@ past that, the batch profile&rsquo;s INT8 tensor-core GEMMs take over. An earlie
 single-GPU C=64 figure at 1,023&nbsp;tok/s &mdash; that measurement overlapped other GPU work, but the
 card was already saturated at 100% utilisation and 249&nbsp;W, so saturated-throughput figures are
 largely contention-insensitive and the two agree within 6%.</p>
+
+<h2 id="ctxceiling">The 64K ceiling was wrong</h2>
+<div class="box stop">
+  <strong>Correction (31 August).</strong> This page previously described ~64K as the practical
+  bf16 limit on one card. <strong>It is not a limit &mdash; it is a config default we mistook for
+  physics.</strong> The launcher reads <code>MAX_LEN=${MAX_LEN:-65536}</code> (line&nbsp;74 of
+  <code>start_qwen.sh</code>), an overridable variable. Meanwhile the server itself was reporting
+  <code>GPU KV cache size: 89,437 tokens</code> at those very settings &mdash; we were serving
+  <strong>37% less context than the card already held</strong>.
+</div>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Attempt</th><th><code>gpu_util</code></th><th><code>max_num_seqs</code></th><th>KV capacity</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td class="n">65,536</td><td class="n">0.93</td><td class="n">8</td><td class="n">89,437</td><td>the old default</td></tr>
+    <tr class="hl"><td class="n">85,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">90,212</td><td><span class="badge">loads &amp; serves</span></td></tr>
+    <tr class="hl"><td class="n">90,000</td><td class="n">0.97</td><td class="n">2</td><td class="n">93,616</td><td><span class="badge">loads &amp; serves</span></td></tr>
+    <tr><td class="n">110,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">&mdash;</td><td><span class="badge stop">refused</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>vLLM states the constraint precisely when you exceed it &mdash; <em>&ldquo;7.56&nbsp;GiB KV cache is
+needed, which is larger than the available KV cache memory (6.31&nbsp;GiB)&rdquo;</em> &mdash; so the
+right behaviour is to surface that message, not to pre-emptively refuse. KV scales at roughly
+<strong>13,700 tokens per GiB</strong> on this model, which is unusually generous because only 16 of
+its 64 layers hold attention KV; the other 48 use fixed-size GDN recurrent state.</p>
+
+<p><strong>The real single-card bf16 ceiling is ~90,000</strong>, and the trade is explicit in the
+table: more context costs concurrency, as <code>max_num_seqs</code> falls 8&nbsp;&rarr;&nbsp;4&nbsp;&rarr;&nbsp;2.</p>
 
 <h2>Context scaling to 64K</h2>
 <div class="box warn">
@@ -705,6 +736,9 @@ on prose.</p>
     <tr><td>Throughput, two-replica</td><td><span class="badge">clean</span></td><td>Both GPUs <em>is</em> the configuration</td></tr>
     <tr><td>Context scaling &#8804;64K</td><td><span class="badge warn">mixed</span></td><td>vLLM and llama.cpp 1&#215;GPU curves contended; 2&#215;GPU clean</td></tr>
     <tr><td>Beyond 64K</td><td><span class="badge warn">mixed</span></td><td>Only the KVarN row is clean; see the per-row column</td></tr>
+    <tr class="hl"><td>Single-card context ceiling</td><td><span class="badge">clean</span></td><td>Server-reported KV capacity; supersedes the ~64K claim</td></tr>
+    <tr><td>TP=2 figures</td><td><span class="badge">clean</span></td><td>Single-tenant &mdash; but the penalty is specific to this board&rsquo;s PCIe wiring</td></tr>
+    <tr><td>KV-quantization arms</td><td><span class="badge warn">small-n</span></td><td>72 cases; arm-to-arm only, and probed only at &le;64K</td></tr>
   </tbody>
 </table>
 </div>
@@ -750,6 +784,123 @@ on prose.</p>
   <strong>An operational trap this surfaced.</strong> Recreating the replicas gives them new addresses on the Docker network, but nginx resolves its upstreams <em>once</em>, at config load. Every request returned <code>502 Bad Gateway</code> until the load balancer was restarted too. Any tooling that switches profiles must restart the balancer after recreating a replica, or the first switch will look like a total outage.
 </div>
 
+
+
+<h2 id="tp">Tensor parallel: the full native window, at a price</h2>
+<p>Two cards had only ever been used as two independent replicas. Splitting one model across both
+&mdash; tensor parallelism &mdash; was untested until now, and it changes the context picture entirely.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Measure</th><th>Single GPU</th><th>TP=2</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>KV cache capacity</td><td class="n">89,437</td><td class="n"><strong>377,518</strong></td><td class="n">&times;4.2</td></tr>
+    <tr class="hl"><td>Max context verified served</td><td class="n">~90,000</td><td class="n"><strong>204,058</strong></td><td class="n">&mdash;</td></tr>
+    <tr><td>Decode, C=1</td><td class="n">167.8</td><td class="n">119.0 <span class="sub">&plusmn;3.4</span></td><td class="n">&minus;29%</td></tr>
+    <tr><td>Throughput, C=16</td><td class="n">610</td><td class="n">234</td><td class="n">&minus;62%</td></tr>
+    <tr><td>Draft acceptance</td><td class="n">~76%</td><td class="n">48.8%</td><td class="n">&mdash;</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>That 4.2&times; exceeds the model&rsquo;s own 262,144 native window, so <strong>bf16 under TP reaches
+the architectural ceiling</strong> &mdash; and the fp8 and KVarN profiles become pointless there, since
+they exist only to stretch a single card. A 204,058-token prompt was verified served, not merely
+loaded, completing in 311&nbsp;s at roughly 656&nbsp;tok/s of prefill.</p>
+
+<div class="box stop">
+  <strong>Pipeline parallelism is not available at all.</strong> <code>PP=2</code> raises
+  <code>NotImplementedError: Pipeline parallelism is not supported for this model</code>.
+  <code>Qwen3_5ForConditionalGeneration</code> does not implement vLLM&rsquo;s <code>SupportsPP</code>
+  interface, so it is unreachable regardless of settings &mdash; a model-implementation gap in vLLM
+  core, not a tuning problem.
+</div>
+
+<div class="box warn">
+  <strong>The TP penalty is this machine&rsquo;s wiring, not a general result.</strong> Do not
+  generalise the &minus;29% / &minus;62% figures. GPU&nbsp;0 sits on a <strong>CPU root port at
+  x8</strong>; GPU&nbsp;1 sits <strong>behind the PCH/chipset at x4</strong>. With
+  <code>Custom allreduce is disabled because your platform lacks GPU P2P capability</code>, NCCL
+  staged through host memory, so every allreduce ran GPU0&nbsp;&rarr;&nbsp;RAM&nbsp;&rarr;&nbsp;DMI&nbsp;&rarr;&nbsp;PCH&nbsp;&rarr;&nbsp;GPU1.
+  On a board with both cards CPU-attached at x8 or x16 this would very likely look different. We
+  also do not recommend running it here at all &mdash; see the fault analysis in
+  <a href="lessons.html">Lessons</a>.
+</div>
+
+<h2 id="kvquant">KV-cache quantization is not free</h2>
+<p>Every quality number in this study before now was measured on <strong>bf16 KV</strong>. The weights
+have always been 4-bit; the cache dtype was the untested variable, and it is the one that governs how
+much context fits on a single card. Measured on a fixed, deterministic 72-exercise subset.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>KV dtype</th><th>pass_1</th><th>pass_2</th><th>Well-formed</th><th>Decode tok/s</th><th>Max context</th><th>VRAM</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td><strong>bf16</strong></td><td class="n">20.8%</td><td class="n"><strong>41.7%</strong></td><td class="n">95.8%</td><td class="n"><strong>158.8</strong> <span class="sub">&plusmn;3.2</span></td><td class="n">65,536</td><td class="n">22.7 GB</td></tr>
+    <tr><td>fp8 <code>e4m3fn</code></td><td class="n">18.1%</td><td class="n">36.1%</td><td class="n">95.8%</td><td class="n">124.4 <span class="sub">&plusmn;2.0</span></td><td class="n">150,000</td><td class="n">21.7 GB</td></tr>
+    <tr><td>KVarN 4/2-bit <span class="sub">n=36</span></td><td class="n">13.9%</td><td class="n">50.0%</td><td class="n">91.7%</td><td class="n">117.6 <span class="sub">&plusmn;2.3</span></td><td class="n">200,000</td><td class="n">21.8 GB</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub" style="max-width:74ch">These scores are comparable <em>to each other only</em>. They are
+a 72-exercise subset and must not be read against the 225-case reference of 12.5 / 48.7 / 90.2.</p>
+
+<div class="box">
+  <strong>fp8 is 22% <em>slower</em> than bf16, not faster.</strong> 124.4 against 158.8&nbsp;tok/s.
+  Quantizing the cache saves memory but adds dequantization work to every attention operation. Its
+  only benefit is context. The &minus;5.6-point pass_2 gap sits inside the resolution limit of a
+  72-case run, so it is not a proven regression &mdash; but &ldquo;changes outputs, scores
+  directionally worse, runs 22% slower&rdquo; is not a case for making it the default.
+</div>
+
+<h3>Both quantized caches change what the model says</h3>
+<p>Each arm is internally deterministic. Compared against the bf16 reference, however, both diverge
+within the <strong>first ~100&ndash;200 characters at every length tested</strong> &mdash; early, not
+merely at depth.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Context</th><th>fp8 diverges at</th><th>KVarN diverges at</th></tr></thead>
+  <tbody>
+    <tr><td class="n">8K</td><td class="n">char 224</td><td class="n">char 93</td></tr>
+    <tr><td class="n">32K</td><td class="n">char 104</td><td class="n">char 204</td></tr>
+    <tr><td class="n">64K</td><td class="n">char 105</td><td class="n">char 105</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="box warn">
+  <strong>KVarN&rsquo;s 50.0% is not evidence that it is better.</strong> It is n=36 on a different
+  subset, and it carries the worst secondary indicators of the three: well-formed falls to 91.7%,
+  error cases double, and it logged 3 test timeouts against bf16&rsquo;s zero. More errors, more
+  timeouts, lower well-formed is what degradation looks like; the headline number is noise on a small
+  sample. If you offer this profile to users, it needs a quality caveat attached.
+</div>
+
+<div class="box warn">
+  <strong>Scope limit, stated plainly.</strong> All three arms were probed at <strong>&le;64K, because
+  the bf16 reference cannot exceed 65,536</strong>. This demonstrates that KV quantization changes
+  output at lengths bf16 can <em>also</em> serve. It does <strong>not</strong> test fidelity at the
+  150K and 200K depths those profiles exist for &mdash; which is precisely where anyone would use
+  them. That remains unmeasured, and we have no clean way to measure it without a reference of the
+  same size.
+</div>
+
+<h2 id="unsloth">Unsloth: resolved, and the answer is no</h2>
+<p>Verified from the repository manifest in the local cache rather than from documentation:
+Unsloth ships <strong>GGUF only</strong> for Qwen3.8-27B &mdash; 30 variants, no AWQ, GPTQ or
+AutoRound exports, and their NVFP4 build is Blackwell-only and unusable on Ampere.</p>
+
+<p>The decisive constraint is vLLM&rsquo;s own documentation, which describes its GGUF support as
+<em>&ldquo;highly experimental and under-optimized&rdquo;</em>, notes it has been moved out-of-tree to a
+plugin, and states that <em>&ldquo;the only confirmed use case is memory footprint reduction&rdquo;</em>.
+So Unsloth&rsquo;s genuine quality-per-byte advantage stays locked inside llama.cpp, at 27.6&ndash;42.6
+tok/s against the patched stack&rsquo;s 167.8 &mdash; roughly <strong>4&times; the speed</strong> to buy it.</p>
+
+<div class="box">
+  <strong>Minor correction.</strong> This study previously listed UD-Q4_K_XL at 17.92&nbsp;GB. The
+  repository manifest gives <strong>17.56&nbsp;GB</strong>.
+</div>
 
 <div class="foot">
   <p><strong>Conditions.</strong> All figures: Qwen3.8-27B at 4-bit (AutoRound W4A16 &ldquo;fast&rdquo;

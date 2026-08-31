@@ -140,10 +140,31 @@ docker compose --profile single up -d     # one or a few users
   <thead><tr><th>Setting</th><th>Values</th><th>What we measured</th></tr></thead>
   <tbody>
     <tr><td><code>SPEC</code></td><td><em>empty</em> = built-in MTP k=4<br><code>dflash2</code> = DFlash2 k=7</td><td>DFlash2 wins on short prompts and code; MTP holds up better past ~8K and on prose. Neither can change output quality — speculative decoding is exact.</td></tr>
-    <tr><td><code>CTX</code></td><td><code>fast</code> bf16 KV, 64K<br><code>long</code> fp8 KV, 150K<br><code>huge</code> KVarN 4/2-bit, ~200K</td><td><code>long</code> was the strongest long-context profile. <code>huge</code> reaches the deepest context on one card but at roughly a third of the speed — take it when the request would not otherwise fit, not for throughput.</td></tr>
+    <tr><td><code>CTX</code></td><td><code>fast</code> bf16 KV, <strong>~90K</strong><br><code>long</code> fp8 KV, 150K<br><code>huge</code> KVarN 4/2-bit, ~200K</td><td><strong>Stay on <code>fast</code> unless you genuinely need more than ~90K.</strong> The quantized caches are not free: fp8 is 22% <em>slower</em> than bf16 and both measurably change the model&rsquo;s output. <code>huge</code> additionally shows degraded secondary indicators. Take them when the request would not otherwise fit, never for speed.</td></tr>
     <tr><td><code>PREFIX_CACHE</code></td><td><code>0</code> / <code>1</code></td><td>Set <code>0</code> for clean benchmarking, <code>1</code> in production. On repeat turns over the same document the fork reports ~23&nbsp;s → ~1&nbsp;s time-to-first-token.</td></tr>
   </tbody>
 </table>
+</div>
+
+<div class="box">
+  <strong>The 65,536 default is not a limit.</strong> The launcher reads
+  <code>MAX_LEN=${MAX_LEN:-65536}</code> &mdash; an overridable variable, and for a long time we
+  mistook it for a hardware ceiling. The server was reporting <code>GPU KV cache size: 89,437
+  tokens</code> at those settings the whole time. Verified working: <code>MAX_LEN=85000</code> with
+  <code>GPU_UTIL=0.96</code> and <code>MAX_SEQS=4</code>; <code>MAX_LEN=90000</code> at
+  <code>0.97</code> and <code>2</code>. Above roughly 90,000 vLLM refuses at load and tells you the
+  arithmetic. The trade is concurrency: more context means fewer sequence slots.
+  <pre><code>MAX_LEN=85000 GPU_UTIL=0.96 MAX_SEQS=4 ./up.sh --wait</code></pre>
+</div>
+
+<div class="box stop">
+  <strong>Do not use tensor parallelism on a board like this one.</strong> <code>--tensor-parallel-size 2</code>
+  does work, and it is the only way to reach the model&rsquo;s full 262,144-token window at bf16
+  fidelity &mdash; a 204,058-token prompt served successfully. But it cost 29% of single-stream speed
+  and 62% of concurrent throughput here, and it is the only workload in this study twice associated
+  with a GPU falling off the PCIe bus. Check your topology first with <code>lspci -vv</code>: our
+  GPU&nbsp;1 sits behind the chipset at x4, so every allreduce crossed the DMI link via host memory.
+  On a board with both cards CPU-attached the trade may be entirely different.
 </div>
 
 <h2>Rung 5 — two cards</h2>
@@ -174,9 +195,10 @@ docker compose --profile single up -d     # one or a few users
   <tbody>
     <tr><td>llama.cpp, 4-bit GGUF, q8_0 KV</td><td class="n">~17 GB</td><td class="n">16.9 GB</td><td class="n">64K comfortably</td></tr>
     <tr><td>Stock vLLM, 4-bit</td><td class="n">~17.5 GB</td><td class="n">19.5–20.3 GB</td><td class="n">4K–8K at these flags</td></tr>
-    <tr class="hl"><td>Patched vLLM, <code>CTX=fast</code></td><td class="n">~17.5 GB</td><td class="n">22.4–22.7 GB</td><td class="n">64K</td></tr>
+    <tr class="hl"><td>Patched vLLM, <code>CTX=fast</code></td><td class="n">~17.5 GB</td><td class="n">22.4–22.7 GB</td><td class="n"><strong>~90K</strong> <span class="sub">65,536 is only the default</span></td></tr>
     <tr><td>Patched vLLM, <code>CTX=long</code> (fp8 KV)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~150K</td></tr>
     <tr><td>Patched vLLM, <code>CTX=huge</code> (KVarN)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~192K measured</td></tr>
+    <tr><td>Patched vLLM, <strong>TP=2</strong> (both cards)</td><td class="n">~8.75 GB<span class="sub">per card</span></td><td class="n">22.6 GB<span class="sub">each</span></td><td class="n">204K verified<span class="sub">not recommended here</span></td></tr>
   </tbody>
 </table>
 </div>
@@ -184,6 +206,24 @@ docker compose --profile single up -d     # one or a few users
 <p>A 4-bit checkpoint whose <code>lm_head</code> and drafter stay in BF16 costs about 1.5&nbsp;GB more than one where they are also quantized — enough that speculation stopped fitting on a single card in one of our comparisons. If you are tight on memory, that is the first thing to look at.</p>
 
 <p>Two 4-bit quantizations of the same model measured 32.7 and 32.9 tok/s under identical conditions — <strong>indistinguishable</strong>. Do not agonize over which 4-bit checkpoint to use; do check whether its <code>lm_head</code> is quantized.</p>
+
+<div class="box warn">
+  <strong>Quantizing the KV cache is a different decision, and it is not free.</strong> It is tempting
+  to reach for fp8 to buy context. Measured: fp8 runs <strong>22% slower than bf16</strong>
+  (124.4 against 158.8&nbsp;tok/s) because it adds dequantization to every attention operation, and
+  both fp8 and KVarN <strong>diverge from the bf16 reference within the first ~100&ndash;200
+  characters</strong> at 8K, 32K and 64K alike. Each is internally deterministic; they simply are not
+  the same model output. Use them for context you cannot otherwise fit, not as a free optimization.
+</div>
+
+<div class="box">
+  <strong>On Unsloth GGUF.</strong> Unsloth publishes GGUF only for this model (no AWQ, GPTQ or
+  AutoRound; their NVFP4 is Blackwell-only). Their Dynamic quantization genuinely has better quality
+  per byte, but vLLM&rsquo;s GGUF support is documented as &ldquo;highly experimental and
+  under-optimized&rdquo; and has moved out-of-tree, so in practice GGUF means llama.cpp &mdash;
+  27.6&ndash;42.6&nbsp;tok/s against the patched stack&rsquo;s 167.8. That is roughly 4&times; the speed
+  to buy the better quantization.
+</div>
 
 <h2>Three things that will waste your afternoon</h2>
 

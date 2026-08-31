@@ -30,7 +30,7 @@
 
 <p class="lede">Every finding on this site came from a machine where a benchmark can be wrong in at least six ways without anything failing. No exception was thrown, no HTTP error returned, no log line printed. In each case the number looked entirely reasonable. That is the hazard: a broken measurement does not announce itself, it just quietly reads a bit high or a bit low, and you publish it.</p>
 
-<h2>Six ways to measure the wrong thing</h2>
+<h2>Eight ways to measure the wrong thing</h2>
 <p>Each of these cost real time here. They are ordered by how much damage they did.</p>
 
 <div class="box warn">
@@ -55,6 +55,23 @@
 
 <div class="box warn">
   <strong>6. Server-restart drift.</strong> Repeated measurements against one running server agree closely. Restart it and the whole set shifts &mdash; the same card and configuration gave 165.4, then 159.6&nbsp;tok/s. Measurements taken either side of a restart are not the same experiment.
+</div>
+
+<div class="box warn">
+  <strong>7. Benchmarking through a load balancer.</strong> A determinism harness pointed at the
+  balancer instead of a specific replica, so two &ldquo;identical&rdquo; calls landed on <em>different
+  servers</em>. bf16 duly appeared non-deterministic at 32K. It was not; the harness was asking two
+  machines the same question. Pin comparisons to one replica &mdash; a load balancer is the correct
+  production entry point and the wrong measurement entry point.
+</div>
+
+<div class="box warn">
+  <strong>8. Running a probe alongside a benchmark.</strong> A divergence probe run concurrently with
+  a benchmark on the same server produced a false <code>self_consistent: false</code>. Batch
+  composition varies with what else is in flight, reduction order varies with it, and near-tie tokens
+  flip. Nothing was broken and nothing was non-deterministic &mdash; the two jobs were simply sharing
+  a batch. Serial execution fixed it. This is trap&nbsp;2&rsquo;s cousin: it is not only <em>other
+  GPUs</em> that contaminate a measurement, but other requests on the same one.
 </div>
 
 <h2>Know your noise floor &mdash; it is three different numbers</h2>
@@ -132,6 +149,64 @@ harness.framework             1.0.0
   <strong>If a genuinely comparable number is ever wanted</strong>, the recipe is: the unquantized checkpoint, the reference harness at its exact commit, that harness's own default sampling parameters, speculation off, and the result reported separately as a reproduction attempt rather than mixed into this table. We did not do this, because the question here was how <em>this deployment</em> behaves &mdash; which is the question that determines what to actually run.
 </div>
 
+<h2 id="xid">The card died twice, and the second one broke our explanation</h2>
+
+<p>GPU&nbsp;0 fell off the PCIe bus twice, seven days apart, with an identical signature both times:</p>
+
+<pre><code>Aug 22 16:24:03  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
+Aug 29 21:49:55  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
+                 NVRM: Xid 154, GPU recovery action ... 0x1 (GPU Reset Required)</code></pre>
+
+<div class="box stop">
+  <strong>Correction (31 August).</strong> We attributed the first fault to a 12&nbsp;V rail brownout
+  and reported the 250&nbsp;W cap as the fix, having re-run the trigger eight times without
+  recurrence. <strong>The second fault happened with both cards verified at 250&nbsp;W.</strong> The
+  power explanation does not cover it, and we should not have presented it as settled.
+</div>
+
+<p>There were <strong>no AER errors</strong> in either boot &mdash; no correctable or uncorrectable
+PCIe errors, nothing preceding the fault. It fails clean, without warning. And Xid&nbsp;79 with no AER
+is consistent with <em>either</em> a power transient or a link fault, so
+<strong>these logs cannot separate the two, and we are not going to pretend otherwise.</strong></p>
+
+<p>What can be said precisely: a power cap bounds <em>average</em> board draw and does nothing about
+microsecond transients. And the workload present at the second fault, tensor parallelism, is uniquely
+bad in that respect &mdash; synchronised allreduce barriers make both cards peak
+<em>simultaneously and repeatedly</em>, where every other workload in this study has one card working
+while the other idles. So the cap being in place rules out sustained over-draw; it does not exonerate
+power.</p>
+
+<h3>The topology is the more useful finding</h3>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Card</th><th>Attached to</th><th>Negotiated width</th></tr></thead>
+    <tbody>
+      <tr><td>GPU&nbsp;0 <code>01:00.0</code></td><td>CPU root port</td><td class="n">x8</td></tr>
+      <tr><td>GPU&nbsp;1 <code>08:00.0</code></td><td><strong>PCH / chipset</strong></td><td class="n">x4</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p>The two cards are wired completely differently. GPU&nbsp;1 sits behind the chipset, so all
+cross-card traffic crosses the DMI link &mdash; and with P2P unavailable, NCCL was staging through
+host memory. Every allreduce ran GPU0&nbsp;&rarr;&nbsp;RAM&nbsp;&rarr;&nbsp;DMI&nbsp;&rarr;&nbsp;PCH&nbsp;&rarr;&nbsp;GPU1
+and back, over x8 and x4 links.</p>
+
+<p>That independently re-explains the tensor-parallel performance result. The &minus;29% single-stream
+and &minus;62% throughput penalty is <strong>not</strong> a generic &ldquo;PCIe without NVLink&rdquo;
+finding, as we first assumed &mdash; it is an x4-behind-the-chipset finding, specific to this board.</p>
+
+<div class="box">
+  <strong>Verdict: do not retry tensor parallelism on this machine.</strong> Three independent
+  reasons. The topology makes it a poor fit on the merits. It is the only workload twice associated
+  with a dead GPU, and the only one that both saturates the link and synchronises peak draw across
+  both cards. And its payoff is now weakly motivated, since context can be pursued through the ~90K
+  single-card ceiling instead. The real fix is hardware &mdash; moving GPU&nbsp;1 to a CPU-attached
+  slot &mdash; not configuration. Note that <code>NCCL_P2P_DISABLE</code> buys nothing here, because
+  P2P was already unavailable.
+</div>
+
 <h2>Provenance</h2>
 <p>Conditions changed across five days as we learned what mattered. Two tables in the log can look directly comparable without being so; this is the key.</p>
 
@@ -145,6 +220,8 @@ harness.framework             1.0.0
       <tr><td><strong>Prompt corpus</strong></td><td>Random filler &rarr; real prose, mid-&sect;11</td><td class="n">large</td><td>Acceptance; never compare across the change</td></tr>
       <tr><td><strong>Prompt length</strong></td><td>Varies by campaign (46 tok &rarr; 192K)</td><td class="n">0.42&rarr;0.66 accept</td><td>The error that produced a wrong correction</td></tr>
       <tr><td><strong>Pinned vs balanced</strong></td><td>Per campaign</td><td class="n">~4&ndash;6%</td><td>&sect;&sect;13&ndash;14, 17 pinned; &sect;&sect;15, 18 balanced</td></tr>
+      <tr><td><strong>KV cache dtype</strong></td><td>bf16 throughout until 30 Aug</td><td class="n">changes output</td><td>Every quality figure before the KV-quant arms</td></tr>
+      <tr><td><strong>PCIe topology</strong></td><td>Fixed property of the board</td><td class="n">x8 vs x4</td><td>All TP figures; not generalisable off this host</td></tr>
     </tbody>
   </table>
 </div>

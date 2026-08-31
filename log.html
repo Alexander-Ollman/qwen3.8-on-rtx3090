@@ -28,7 +28,7 @@
   <p class="standfirst">The complete record, in the order it happened &mdash; including the runs that were wrong, the corrections, and the one comparison that could not be made at all. Sections&nbsp;1&ndash;9 are prior research; 10&ndash;20 are measurements from this machine.</p>
 </header>
 <div class="box warn"><strong>Read section&nbsp;19 first if you plan to cite anything.</strong> Conditions changed across the five days &mdash; power cap, reasoning setting, prompt corpus, single-tenancy &mdash; and two tables in this document can look comparable without being so. Section&nbsp;19 is the provenance key; section&nbsp;20 holds the canonical numbers, and wins wherever an earlier section disagrees.</div>
-<nav class="toc-inline" aria-label="Sections"><p class="toc-title">The 20 sections</p><ol><li><a href="#quants">Weight Quantizations</a></li><li><a href="#gguf">GGUF Variants (llama.cpp / Ollama)</a></li><li><a href="#kv">KV Cache Quantization</a></li><li><a href="#mtp">MTP Speculative Decoding</a></li><li><a href="#frameworks">Serving Frameworks</a></li><li><a href="#strategies">Dual-3090 Deployment Strategies</a></li><li><a href="#perf">Published Performance Numbers</a></li><li><a href="#accuracy">Accuracy Deep-Dive</a></li><li><a href="#configs">Recommended Benchmark Configurations</a></li><li><a href="#measured">Measured Results</a></li><li><a href="#ctxscaling">Speed vs Context Length</a></li><li><a href="#coding">Coding Workloads, Measured Clean</a></li><li><a href="#agentic">Multi-Turn Agentic Profile</a></li><li><a href="#crosscheck">Independent Cross-Check</a></li><li><a href="#correctness">Correctness &mdash; Aider Polyglot</a></li><li><a href="#quantblock">A Comparison That Could Not Be Run</a></li><li><a href="#servinglayer">Choosing a Serving Layer for Comparison</a></li><li><a href="#reportcard">The Framework&rsquo;s First Report Card</a></li><li><a href="#provenance">Reading These Numbers</a></li><li><a href="#canonical">Canonical Numbers</a></li></ol></nav><!-- 1. Weight Quantizations -->
+<nav class="toc-inline" aria-label="Sections"><p class="toc-title">The 24 sections</p><ol><li><a href="#quants">Weight Quantizations</a></li><li><a href="#gguf">GGUF Variants (llama.cpp / Ollama)</a></li><li><a href="#kv">KV Cache Quantization</a></li><li><a href="#mtp">MTP Speculative Decoding</a></li><li><a href="#frameworks">Serving Frameworks</a></li><li><a href="#strategies">Dual-3090 Deployment Strategies</a></li><li><a href="#perf">Published Performance Numbers</a></li><li><a href="#accuracy">Accuracy Deep-Dive</a></li><li><a href="#configs">Recommended Benchmark Configurations</a></li><li><a href="#measured">Measured Results</a></li><li><a href="#ctxscaling">Speed vs Context Length</a></li><li><a href="#coding">Coding Workloads, Measured Clean</a></li><li><a href="#agentic">Multi-Turn Agentic Profile</a></li><li><a href="#crosscheck">Independent Cross-Check</a></li><li><a href="#correctness">Correctness &mdash; Aider Polyglot</a></li><li><a href="#quantblock">A Comparison That Could Not Be Run</a></li><li><a href="#servinglayer">Choosing a Serving Layer for Comparison</a></li><li><a href="#reportcard">The Framework&rsquo;s First Report Card</a></li><li><a href="#provenance">Reading These Numbers</a></li><li><a href="#canonical">Canonical Numbers</a></li><li><a href="#ceiling">The 64K Ceiling Was a Default</a></li><li><a href="#tppp">Tensor and Pipeline Parallelism</a></li><li><a href="#faults">Two GPU Faults, One Broken Explanation</a></li><li><a href="#kvq">KV Quantization Is Not Free</a></li></ol></nav><!-- 1. Weight Quantizations -->
   <section class="section" id="quants">
     <h2>1. Weight Quantizations</h2>
     <p class="section-note">All formats available on HuggingFace for Qwen3.8-27B, ranked by accuracy. VRAM is weights-only; add 2&ndash;8 GB for KV cache depending on context length and cache dtype.</p>
@@ -192,7 +192,7 @@
           </tr>
           <tr style="outline: 2px solid var(--warn); outline-offset: -1px;">
             <td class="mono"><strong>UD-Q4_K_XL</strong></td>
-            <td class="n">17.92 GB</td>
+            <td class="n">17.56 GB</td>
             <td class="n">96.02%</td>
             <td class="n">0.00955</td>
             <td><span class="badge warn">94&ndash;97%</span></td>
@@ -975,7 +975,7 @@
         <div class="rec-rank">6</div>
         <div class="rec-body">
           <h4>llama.cpp + Unsloth UD-Q4_K_XL + MTP n=3</h4>
-          <p>Simplest deployment. Unsloth Dynamic v3.0 GGUF (17.92 GB, KLD 0.00955) with built-in MTP heads and Q4 KV cache. No continuous batching but excellent single-stream performance. Minimum safe quant for agentic use per Unsloth&rsquo;s own guidance.</p>
+          <p>Simplest deployment. Unsloth Dynamic v3.0 GGUF (17.56 GB per the repository manifest &mdash; this document previously said 17.92 GB; KLD 0.00955) with built-in MTP heads and Q4 KV cache. No continuous batching but excellent single-stream performance. Minimum safe quant for agentic use per Unsloth&rsquo;s own guidance.</p>
           <div class="rec-stats">
             <span class="rec-stat">~134&ndash;151 tok/s C=1</span>
             <span class="rec-stat">No batching</span>
@@ -2139,13 +2139,150 @@
       </table>
     </div>
     <p class="section-note">One open discrepancy, stated rather than smoothed: <strong>DFlash2 at ~1K measures 212.1 here against &sect;12&rsquo;s 181.5, a 17% gap.</strong> Both runs were single-tenant and this one has a &plusmn;0.6% spread across five repeats. The cause is unidentified. The patched-versus-stock advantage is <strong>1.96&times;</strong> at both prompt lengths, revising the 2.3&times; quoted in &sect;17.</p>
-  </section><div class="foot">
+  </section>
+<section class="section" id="ceiling">
+<h2>21. The 64K Ceiling Was a Default &mdash; 30 August</h2>
+<p class="section-note">Sections 11 and 17 treat ~64K as the practical bf16 limit on a single card.
+It is not a limit. <code>start_qwen.sh</code> line 74 reads <code>MAX_LEN=${MAX_LEN:-65536}</code>,
+an overridable default that was mistaken for a hardware constraint &mdash; while the running server
+was reporting <code>GPU KV cache size: 89,437 tokens</code> at those same settings.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>max_model_len</th><th>gpu_util</th><th>max_num_seqs</th><th>KV capacity</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td class="n">65,536</td><td class="n">0.93</td><td class="n">8</td><td class="n">89,437</td><td>the old default</td></tr>
+    <tr class="hl"><td class="n">85,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">90,212</td><td>loads and serves</td></tr>
+    <tr class="hl"><td class="n">90,000</td><td class="n">0.97</td><td class="n">2</td><td class="n">93,616</td><td>loads and serves</td></tr>
+    <tr><td class="n">110,000</td><td class="n">0.96</td><td class="n">4</td><td class="n">&mdash;</td><td>refused at load</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">vLLM names the constraint exactly when exceeded: <em>&ldquo;7.56 GiB KV cache
+is needed, which is larger than the available KV cache memory (6.31 GiB)&rdquo;</em>. KV scales at
+roughly 13,700 tokens per GiB here &mdash; generous because only 16 of 64 layers hold attention KV.
+<strong>The real ceiling is ~90,000, and we had been serving 37% less than the card held.</strong>
+The cost of more context is concurrency: max_num_seqs falls 8 &rarr; 4 &rarr; 2.</p>
+</section>
+
+<section class="section" id="tppp">
+<h2>22. Tensor and Pipeline Parallelism &mdash; 29 August</h2>
+<p class="section-note">Both cards had only ever been used as independent replicas. Six configurations
+were planned; four ran, one was blocked by a model-implementation gap, one was abandoned as redundant.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Measure</th><th>Single GPU</th><th>TP=2</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>KV cache capacity</td><td class="n">89,437</td><td class="n"><strong>377,518</strong> <span class="sub">&times;4.2</span></td></tr>
+    <tr class="hl"><td>Max context verified served</td><td class="n">~90,000</td><td class="n"><strong>204,058</strong> <span class="sub">311 s, ~656 tok/s prefill</span></td></tr>
+    <tr><td>Decode, C=1</td><td class="n">167.8</td><td class="n">119.0 &plusmn;3.4 <span class="sub">&minus;29%</span></td></tr>
+    <tr><td>Throughput, C=16</td><td class="n">610</td><td class="n">234 <span class="sub">&minus;62%</span></td></tr>
+    <tr><td>Draft acceptance</td><td class="n">~76%</td><td class="n">48.8%</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">The 4.2&times; capacity exceeds the model&rsquo;s own 262,144 native window, so
+bf16 under TP reaches the architectural ceiling and the fp8/KVarN profiles become pointless there.
+<strong>PP=2 is unreachable:</strong> <code>NotImplementedError: Pipeline parallelism is not supported
+for this model</code> &mdash; <code>Qwen3_5ForConditionalGeneration</code> does not implement vLLM&rsquo;s
+<code>SupportsPP</code>. The fp8-at-native configuration was abandoned after ten minutes of FlashInfer
+JIT compilation, being redundant once bf16 reached 262,144.</p>
+
+<div class="box">
+  <strong>The penalty is this board&rsquo;s wiring, not a general PCIe result.</strong> GPU 0 is on a
+  CPU root port at x8; GPU 1 is behind the PCH at x4. With <code>Custom allreduce is disabled because
+  your platform lacks GPU P2P capability</code>, NCCL staged through host memory, so every allreduce
+  ran GPU0 &rarr; RAM &rarr; DMI &rarr; PCH &rarr; GPU1. Do not generalise these figures.
+</div>
+</section>
+
+<section class="section" id="faults">
+<h2>23. Two GPU Faults, One Broken Explanation &mdash; 22 and 29 August</h2>
+<pre><code>Aug 22 16:24:03  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
+Aug 29 21:49:55  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
+                 NVRM: Xid 154, GPU recovery action ... 0x1 (GPU Reset Required)</code></pre>
+
+<p class="section-note">Same card, identical signature, seven days apart. <strong>No AER errors in
+either boot</strong> &mdash; no correctable or uncorrectable PCIe errors, nothing preceding the fault.</p>
+
+<div class="box">
+  <strong>Correction.</strong> Section 10 and the guide attribute the first fault to a 12 V brownout
+  and present the 250 W cap as the fix, on the evidence of eight clean re-runs of the trigger.
+  <strong>The second fault occurred with both cards verified at 250 W.</strong> Xid 79 without AER is
+  consistent with either a power transient or a link fault, and these logs cannot separate them. A cap
+  bounds average board power, not microsecond transients &mdash; and TP=2 is uniquely bad there,
+  because synchronised allreduce barriers make both cards peak simultaneously, where every other
+  workload here has one card working while the other idles. The cap rules out sustained over-draw; it
+  does not exonerate power.
+</div>
+
+<p class="section-note"><strong>Verdict: do not retry TP=2 on this machine.</strong> The topology makes
+it a poor fit on the merits; it is the only workload twice associated with a dead GPU; and its payoff
+is weakly motivated now that ~90K is reachable on one card. <code>NCCL_P2P_DISABLE</code> buys nothing,
+since P2P was already unavailable. The real remedy is hardware &mdash; moving GPU 1 to a CPU-attached
+slot.</p>
+</section>
+
+<section class="section" id="kvq">
+<h2>24. KV Quantization Is Not Free &mdash; 30 August</h2>
+<p class="section-note">Every quality figure in this document before this section was measured on
+bf16 KV. The weights were always 4-bit; the cache dtype was the untested variable. Fixed deterministic
+72-exercise subset; <strong>arm-to-arm comparable only</strong>, not against the 225-case 12.5 / 48.7 /
+90.2 reference.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>KV dtype</th><th>pass_1</th><th>pass_2</th><th>Well-formed</th><th>Decode tok/s</th><th>Max ctx</th><th>VRAM</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>bf16</td><td class="n">20.8%</td><td class="n"><strong>41.7%</strong></td><td class="n">95.8%</td><td class="n"><strong>158.8</strong> &plusmn;3.2</td><td class="n">65,536</td><td class="n">22.7 GB</td></tr>
+    <tr><td>fp8 e4m3fn</td><td class="n">18.1%</td><td class="n">36.1%</td><td class="n">95.8%</td><td class="n">124.4 &plusmn;2.0</td><td class="n">150,000</td><td class="n">21.7 GB</td></tr>
+    <tr><td>KVarN 4/2-bit <span class="sub">n=36</span></td><td class="n">13.9%</td><td class="n">50.0%</td><td class="n">91.7%</td><td class="n">117.6 &plusmn;2.3</td><td class="n">200,000</td><td class="n">21.8 GB</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note"><strong>fp8 is 22% slower than bf16, not faster.</strong> Its only benefit is
+context. The &minus;5.6-point pass_2 gap sits inside the resolution limit of a 72-case run and is not
+a proven regression, but the direction is unhelpful and the speed cost is not in doubt.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Context</th><th>fp8 diverges from bf16 at</th><th>KVarN diverges at</th></tr></thead>
+  <tbody>
+    <tr><td class="n">8K</td><td class="n">char 224</td><td class="n">char 93</td></tr>
+    <tr><td class="n">32K</td><td class="n">char 104</td><td class="n">char 204</td></tr>
+    <tr><td class="n">64K</td><td class="n">char 105</td><td class="n">char 105</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">Each arm is internally deterministic, yet both quantized caches diverge from
+the bf16 reference within the first ~100&ndash;200 characters at every length. KV quantization
+measurably changes what the model says, early rather than only at depth.</p>
+
+<div class="box">
+  <strong>KVarN&rsquo;s 50.0% is not evidence of superiority.</strong> n=36 on a different subset, and
+  it carries the worst secondary indicators of the three: well-formed 91.7%, doubled error cases, and
+  3 test timeouts against bf16&rsquo;s zero. That profile is what degradation looks like; the headline
+  number is small-sample noise.
+</div>
+
+<div class="box">
+  <strong>Scope limit.</strong> All arms were probed at &le;64K, because the bf16 reference cannot
+  exceed 65,536. This shows KV quantization changes output at lengths bf16 can also serve. It does
+  <strong>not</strong> test fidelity at the 150K/200K depths those profiles exist for. That remains
+  unmeasured.
+</div>
+
+<p class="section-note"><strong>Two harness traps found en route.</strong> The divergence harness
+initially called the load balancer, so two &ldquo;identical&rdquo; calls hit different replicas and
+bf16 falsely appeared non-deterministic. And a probe run concurrently with a benchmark had batch-shape
+variation flip near-ties, producing another false non-determinism result. Both produced
+plausible-looking wrong answers; both were fixed by pinning to one replica and running serially.</p>
+</section>
+
+<div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
     <p><sup class="fn">2</sup> Range spans baseline vLLM INT4 (~114, syv-ai) to llama.cpp Q4+MTP n=3 (~134&ndash;151, kgptalkie).</p>
     <p><sup class="fn">3</sup> SGLang SMG cache-aware routing claims +92% throughput vs round-robin on prefix-heavy workloads; actual 3090 numbers are untested. Unique-prompt throughput should match vLLM within ~2&ndash;4%.</p>
     <p><sup class="fn">3.6</sup> Measured on Qwen3.6-27B. Same hybrid architecture (GDN+softmax), same parameter count. Directly comparable for throughput; Qwen3.8 is a training improvement, not an architecture change.</p>
     <p style="margin-top: 1rem;"><strong>Key sources:</strong> syv-ai/qwen38-27b-rtx3090, tfriedel/qwen3.6-rtx3090-lab, dbirks &amp; Pilcothink HF repos, lued/Qwen3.8-27B-INT8-W8A16-MTP, kingy.ai GGUF benchmarks, kgptalkie llama.cpp guide, AtomicChat/Unsloth GGUF repos, RadixArk/Qwen3.8-27B-DSpark, SGLang GitHub (sgl-project/sglang, PR #23331), Qwen official blog.</p>
-    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;11 are this host, at a 250 W power cap.</p>
+    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;24 are this host, at a 250 W power cap.</p>
   </div>
 
 
