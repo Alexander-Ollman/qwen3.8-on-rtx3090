@@ -2339,13 +2339,252 @@ download and hours of calibration.</p>
 <p>That leaves EXL3 (3.0&nbsp;bpw &asymp; 12.89&nbsp;GiB, implying ~150K context on one card) as the
 only remaining route to a smaller checkpoint, on a different serving stack, with MTP support unknown.</p>
 
+<h2 id="exl3">26. Group-Size Fix Verified; ExLlamaV3 Measured <span class="badge">1 SEP</span></h2>
+
+<p>Two loose ends from &sect;25 closed in one session, and a third opened.</p>
+
+<h3>The prep pipeline is checkpoint-agnostic</h3>
+<p>&sect;25 recorded that the <code>cyankiwi</code> load failure was our own hard-coded
+<code>GROUP = 128</code>, not vLLM. The fix now derives the group size from the checkpoint&rsquo;s own
+<code>config.json</code>, and it is verified live rather than by inspection: all three prep scripts
+derived <strong>group 32</strong> from <code>config_groups.group_0</code> and passed their round-trip
+gates (lm_head 0.53%, embed_tokens 0.49%, MTP linears 0.54&ndash;0.84%). vLLM loaded the checkpoint in
+12&nbsp;s with no scale-shape error, detected MTP, and served coherently at
+<strong>139.5&nbsp;&plusmn;0.2&nbsp;tok/s</strong> greedy with <strong>72.8% draft acceptance</strong>
+(per-position 0.93 / 0.79 / 0.66 / 0.54, mean accepted length 3.91). The gap to the deployed
+~149.6 is the missing <code>-fast</code> variant &mdash; int4 head plus own-output draft vocabulary,
+worth about 15% on its own &mdash; not the group size. One further checkpoint assumption fell out:
+<code>build_draft_vocab.py</code> expected a <code>model_extra_tensors.safetensors</code> shard that
+only our own checkpoint ships, and now creates it when absent.</p>
+
+<div class="box">
+  <strong>But cyankiwi is the wrong checkpoint for this card.</strong> Its <code>ignore</code> list
+  leaves every GDN layer&rsquo;s <code>linear_attn.in_proj_a</code>/<code>in_proj_b</code> (48 each) in
+  bf16. Weights took <strong>16.46 GiB</strong> against AutoRound&rsquo;s <strong>13.97 GiB</strong>, and
+  group-32 scales are 4&times; the size of group-128 scales, so it could not start at the 64K default
+  &mdash; <em>&ldquo;4.68 GiB KV cache is needed, 2.9 GiB available, estimated maximum model length
+  38016&rdquo;</em>. A finer group size is not a smaller file. It is a <em>larger</em> checkpoint that
+  buys <em>less</em> context. Do not deploy it; the value of the run was the pipeline, not the weights.
+</div>
+
+<h3>ExLlamaV3 does support MTP on this model</h3>
+<p>&sect;25 left EXL3 as the only remaining route to a smaller checkpoint, with MTP support unknown.
+Read from ExLlamaV3 1.4.5 source: <code>exllamav3/architecture/qwen3_5_mtp.py</code> loads the
+<code>mtp.*</code> head as a draft component, with GDN state rewind on rejection, and
+<code>turboderp/Qwen3.8-27B-exl3</code> ships 39 <code>mtp.*</code> tensors in every branch. Measured on
+GPU&nbsp;1 with the GPU&nbsp;0 replica idle &mdash; the same condition as the 149.6 comparator &mdash; at
+3.00&nbsp;bpw, greedy, fixed 512-token probe:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>ExLlamaV3 1.4.5 config</th><th>tok/s</th><th>Draft accept</th><th>VRAM free after load</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>MTP k=4, fp16 cache 32K</td><td class="n"><strong>94.8</strong> &plusmn;0.5</td><td class="n">70.5%</td><td class="n">6.42 GiB</td></tr>
+    <tr><td>No speculation, 32K</td><td class="n">43.6 &plusmn;0.3</td><td class="n">&mdash;</td><td class="n">6.43 GiB</td></tr>
+    <tr><td>MTP k=4, fp16 cache 128K</td><td class="n">93.8 &plusmn;0.6</td><td class="n">70.3%</td><td class="n">1.03 GiB</td></tr>
+    <tr><td>MTP k=4, q8 cache 200K</td><td class="n">91.6 &plusmn;0.9</td><td class="n">69.2%</td><td class="n">2.23 GiB</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">MTP is worth <strong>2.2&times;</strong> and acceptance matches vLLM&rsquo;s
+70&ndash;76%, so EXL3 avoids the llama.cpp wall &mdash; but 94.8 is <strong>63% of the patched
+stack&rsquo;s 149.6</strong>. What it buys is context on one card: 128K at fp16 KV, 200K at q8, against
+vLLM&rsquo;s 85K bf16. The fp16 ceiling is sharp &mdash; with no draft model resident, 131,072 loads with
+0.3&nbsp;GiB spare and 135,168 fails autosplit. Caveats recorded: a separate recurrent draft model is rejected outright, stock
+exllamav3 has no DFlash2, and upstream issue #317 reports <code>cache_mode 8,5</code> crashing on long
+prefill for this model, so keep V-bits even. Quality at 3.0&nbsp;bpw was not measured here &mdash; that is
+&sect;28.</p>
+
+<h3>Free-running divergence was the wrong instrument</h3>
+<p>&sect;24&rsquo;s scope limit &mdash; &ldquo;fidelity at 150K/200K remains unmeasured, and we have no
+clean way to measure it&rdquo; &mdash; was accepted too readily. The method is written up in
+<code>longctx-fidelity-proposal.md</code>: stop using free-running divergence, which compounds
+coin-flips and cannot exist above the reference ceiling, and use teacher-forced per-position NLL on
+unmemorisable documents plus known-answer probes at depth. Pass/fail thresholds written down before
+running anything.</p>
+
+
+<h2 id="fidharness">27. Building the Fidelity Harness <span class="badge">2 SEP</span></h2>
+
+<p>Three pieces, built in parallel, all of which landed.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Piece</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td>Harness</td><td><code>nll.py</code>, <code>nll_compare.py</code>, <code>probes.py</code> against vLLM; determinism floor is exactly zero, so any excess NLL is signal</td></tr>
+    <tr><td>Documents</td><td>Five frozen documents of &ge;200K tokens with sources, hashes and prompts recorded</td></tr>
+    <tr><td>EXL3 backend</td><td><code>nll_exl3.py</code>, writing the same schema; TabbyAPI on port 18031 with <code>draft_mode: mtp</code></td></tr>
+  </tbody>
+</table></div>
+
+<div class="tw"><table>
+  <thead><tr><th>Document</th><th>Source</th><th>Tokens</th></tr></thead>
+  <tbody>
+    <tr><td><code>gen1</code></td><td>Model-generated: a literary-SF novel about a gravitational-wave collaboration</td><td class="n">202,296</td></tr>
+    <tr><td><code>gen2</code></td><td>Model-generated: an engineering design document for a time-series database</td><td class="n">214,368</td></tr>
+    <tr><td><code>gen3</code></td><td>Model-generated: an interlinked essay sequence</td><td class="n">212,578</td></tr>
+    <tr><td><code>nat1</code></td><td>22 arXiv papers submitted 2026-07-22 to 2026-09-01</td><td class="n">207,877</td></tr>
+    <tr><td><code>nat2</code></td><td>22 arXiv papers submitted 2026-07-23 to 2026-09-01</td><td class="n">206,061</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">The natural documents are dated after the model&rsquo;s assumed training cut, so
+neither set can be predicted from weights alone. All five are frozen with sha256 recorded and must not
+be regenerated: a changed document invalidates every comparison against it.</p>
+
+<div class="box">
+  <strong>Generating 200K tokens is its own study.</strong> The model does not fail by producing
+  nonsense. It winds down into one of four modes, each of which is self-seeding &mdash; leave it in the
+  document and the next continuation, handed that tail as context, does more of it. <strong>Chant</strong>
+  (a closing run of one-line paragraphs), <strong>staccato</strong> (sentences collapse to four to six
+  words), <strong>anaphora</strong> (&ldquo;He thought about the X. He thought about the Y.&rdquo; &mdash;
+  lexically varied, so n-gram tests miss it), and <strong>replay</strong> (reproducing the handed excerpt
+  at length before continuing, starting thousands of tokens back so the naive overlap check misses it).
+  Rejection rates at the same temperature and top_p: the novel kept <strong>167 of 225</strong> rounds and the
+  essay sequence <strong>128 of 170</strong>; the technical design document kept <strong>47 of 48</strong>.
+  Structure to fill in is what prevents wind-down.
+</div>
+
+<div class="box">
+  <strong>Trap: <code>prompt_logprobs</code> OOM-killed a production replica.</strong> The first such
+  request killed the GPU&nbsp;0 engine and Docker restarted it. vLLM log-softmaxes the full 248K
+  vocabulary in fp32 for every scheduled prompt token, and at <code>gpu_util 0.96</code> there is roughly
+  250&nbsp;MiB spare. Fidelity runs now use a dedicated one-off container on GPU&nbsp;1 &mdash; same image,
+  <code>GPU_UTIL=0.92 MAX_LEN=76800 EXTRA_ARGS="--max-num-batched-tokens 256"</code>, prefix cache off,
+  one request at a time. That headroom is why the bf16 reference ceiling in &sect;28 is <strong>76.8K,
+  not 85K</strong>.
+</div>
+
+<div class="box">
+  <strong>Trap: <code>docker compose up -d &lt;service&gt;</code> recreates its dependencies.</strong>
+  <code>lb</code> depends on both replicas. Bringing up only the balancer while the one-off fidelity
+  container held port 18021 failed on GPU&nbsp;1 as expected &mdash; and silently recreated the healthy
+  <code>qwen38-gpu0</code> on the way. Three minutes of outage, in-flight requests lost, from a command
+  naming one service. Use <code>--no-deps</code> whenever a test container occupies a card.
+</div>
+
+<p class="section-note">Also recorded: <code>nll_exl3.py</code> tokenises with the <em>contract</em>
+tokenizer rather than the EXL3 model directory&rsquo;s own, because the two are not identical &mdash; the
+EXL3 copy&rsquo;s pre-tokenizer regex handles <code>\p{M}</code> differently and the two disagree on text
+with combining marks. The vocabularies are byte-identical, so contract ids feed the EXL3 model directly.
+On a synthetic 32,768-token document the harness measured 3.00&nbsp;bpw costing
+<strong>+0.0182 nats/token</strong> over 4.00&nbsp;bpw, confirming it resolves differences of exactly the
+size the study was looking for.</p>
+
+
+<h2 id="fidresults">28. Long-Context Fidelity Results <span class="badge">3 SEP</span></h2>
+
+<p>Excess NLL against bf16 over 0&ndash;76K, mean / worst 8K bucket, nats per token. Threshold 0.02,
+set before the run.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Profile</th><th>gen1</th><th>gen2</th><th>gen3</th><th>nat1</th><th>nat2</th><th>top-1 min</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>vLLM fp8</td><td class="n">+0.008 / +0.025</td><td class="n">&minus;0.005 / +0.001</td><td class="n">+0.001 / +0.001</td><td class="n">&minus;0.033 / +0.006</td><td class="n">&minus;0.026 / +0.022</td><td class="n"><strong>0.921</strong></td></tr>
+    <tr><td>vLLM KVarN</td><td class="n">+0.011 / +0.030</td><td class="n">+0.027 / +0.116</td><td class="n">+0.005 / +0.007</td><td class="n">+0.025 / +0.084</td><td class="n">&minus;0.043 / +0.008</td><td class="n">0.830</td></tr>
+    <tr><td>EXL3 3.0 fp16</td><td class="n">+0.025 / +0.067</td><td class="n">+0.011 / +0.036</td><td class="n">+0.034 / +0.043</td><td class="n">+0.127 / +0.213</td><td class="n">+0.026 / +0.137</td><td class="n">0.744</td></tr>
+    <tr><td>EXL3 3.0 q8</td><td class="n">+0.025 / +0.067</td><td class="n">+0.011 / +0.036</td><td class="n">+0.034 / +0.043</td><td class="n">+0.130 / +0.215</td><td class="n">+0.028 / +0.148</td><td class="n">0.743</td></tr>
+    <tr><td>EXL3 4.0 q8</td><td class="n">+0.024 / +0.039</td><td class="n">&minus;0.013 / +0.020</td><td class="n">+0.017 / +0.022</td><td class="n">+0.280 / +0.385</td><td class="n">+0.256 / +0.425</td><td class="n">0.761</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">Natural text (nat1/nat2, mean NLL ~4.7) is where quantization shows; the
+model&rsquo;s own text (gen*, mean NLL 0.2&ndash;0.5) is easy and hides it. Negative means on nat1/nat2 are
+kernel numerics &mdash; FlashAttention bf16 against FlashInfer fp8 &mdash; not fp8 being better.</p>
+
+<p>Above 76K no reference exists, so profiles are compared to each other with fp8 as the anchor.
+&ldquo;Other minus fp8&rdquo;, mean / worst bucket, then minimum top-1 agreement, over 80&ndash;150K:</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Document</th><th>KVarN vs fp8</th><th>EXL3 3.0 q8 vs fp8</th></tr></thead>
+  <tbody>
+    <tr><td>gen1</td><td class="n">+0.005 / +0.008 &#183; 0.962</td><td class="n">+0.045 / +0.057 &#183; 0.915</td></tr>
+    <tr><td>gen2</td><td class="n">+0.005 / +0.009 &#183; 0.976</td><td class="n">+0.028 / +0.036 &#183; 0.947</td></tr>
+    <tr><td>gen3</td><td class="n">+0.004 / +0.006 &#183; 0.972</td><td class="n">+0.032 / +0.042 &#183; 0.929</td></tr>
+    <tr class="hl"><td>nat1</td><td class="n">+0.072 / +0.129 &#183; 0.833</td><td class="n">+0.008 / +0.158 &#183; 0.748</td></tr>
+    <tr class="hl"><td>nat2</td><td class="n">+0.011 / +0.096 &#183; 0.846</td><td class="n">+0.083 / +0.257 &#183; 0.757</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note"><strong>fp8 shows no inflection with depth on any document.</strong> KVarN drifts
+&mdash; its nat1 gap roughly triples between the sub-76K band (+0.025 mean) and 80&ndash;150K (+0.072 mean,
++0.129 worst), while staying inside 0.01 on generated text. EXL3&rsquo;s gap at depth is the same size as
+its gap to bf16 in the overlap band: a weight-quantization cost, flat with depth.</p>
+
+<div class="box">
+  <strong>Criterion B is retired.</strong> The proposal said no bucket past 80K may exceed the
+  57&ndash;76K mean by more than 0.05 nats. On gen3 fp8 and KVarN <em>both</em> rise by +0.075 while
+  agreeing with each other to 0.005 nats &mdash; the rise is the document, not the cache. An absolute
+  threshold on a metric that tracks content is content-confounded. The reference-free cross-profile
+  comparison is immune, because both arms read the same words.
+</div>
+
+<h3>Known-answer probes at depth</h3>
+<div class="tw"><table>
+  <thead><tr><th>Profile</th><th>Depths</th><th>Multi-key</th><th>Verbatim</th><th>Cross-reference</th></tr></thead>
+  <tbody>
+    <tr><td>bf16 <span class="sub">n=10</span></td><td class="n">16K / 32K / 64K</td><td class="n">80/80</td><td class="n">100%</td><td class="n">10/10</td></tr>
+    <tr class="hl"><td>fp8 <span class="sub">n=5</span></td><td class="n">64K / 128K / 147K</td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+    <tr class="hl"><td>KVarN <span class="sub">n=5</span></td><td class="n">64K / 128K / 196K</td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+    <tr><td>EXL3 3.0 <span class="sub">n=5</span></td><td class="n">64K / 123K</td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">Every instance passed at every depth for every profile &mdash; KVarN at 196K
+and EXL3 3.0 bpw at 123K included. The fidelity cost above does not surface as retrieval, copying or
+multi-hop failure &mdash; it is a distribution shift, not a capability loss, which is why it took a
+distributional instrument to see.</p>
+
+<div class="box">
+  <strong>The EXL3 row took two attempts, and the first was a harness bug.</strong> The first run scored
+  0 on every instance because <code>probes.py</code> assumed a non-null <code>usage</code> field and
+  TabbyAPI returns <code>usage: null</code>; the scorer raised on every row and recorded the exception as
+  a zero, while the server&rsquo;s own log showed 200s and sensible generations. A harness that scores its
+  own exceptions will report a catastrophic model failure with complete confidence. Fixed and rerun
+  clean at both depths.
+</div>
+
+<h3>Why 4.0 bpw does not rescue EXL3</h3>
+<p>Plain 4.0 bpw scoring <em>worse</em> than 3.0 on natural text is surprising enough to chase down.</p>
+
+<div class="tw"><table>
+  <thead><tr><th>Control</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>3.0 q8 repeated a day later</td><td>Bit-identical</td></tr>
+    <tr><td>Plain 4.0, fp16 vs q8 cache, nat1 at 32K</td><td class="n">0.01 nats, 98.6% top-1 &mdash; cache quantization irrelevant</td></tr>
+    <tr><td>Plain 4.0 vs self-calibrated <code>SC_4.00bpw_H5</code>, nat1 at 64K</td><td class="n">SC worse still: +0.12 to +0.28 per bucket, 84&ndash;88% top-1</td></tr>
+    <tr><td>Excess vs bf16 on nat1, per 8K bucket</td><td class="n">3.0: +0.08 to +0.22 &#183; plain 4.0: +0.19 to +0.39 &#183; SC 4.0: +0.35 to +0.54</td></tr>
+    <tr class="hl"><td>ExLlamaV3&rsquo;s own <code>eval/ppl.py</code>, wikitext-2, 100 rows &times; 2048</td><td class="n">3.0 <strong>6.99</strong> &#183; plain 4.0 <strong>7.03</strong> &#183; SC 4.0 <strong>7.00</strong></td></tr>
+  </tbody>
+</table></div>
+
+<p class="section-note">The harness is not at fault. By ExLlamaV3&rsquo;s own perplexity tool the two
+published 4.0&nbsp;bpw files are no better than the 3.0&nbsp;bpw file, and on recent arXiv prose they are
+clearly worse. Why remains unexplained &mdash; calibration-set mismatch or a bad upstream quantization
+run are the candidates, both outside our control.</p>
+
+<div class="box">
+  <strong>Decision: for context past 85K on this box, patched vLLM with fp8 KV at 150K.</strong> No
+  measurable fidelity cost against bf16, no inflection to 150K, 100% on every probe to 147K. The only
+  price is the known 22%: 124.4 against 158.8 tok/s. <strong>KVarN at 200K</strong> costs up to ~0.12
+  nats on hard text and drifts with depth &mdash; the answer to &ldquo;it must fit&rdquo;, not a default.
+  <strong>EXL3 at 3.0 bpw</strong> buys 200K on one card for ~0.13 nats on natural text, 74% top-1, and
+  37% of the speed given up; it loses to fp8 at 150K on every axis but raw length, and to KVarN at 200K
+  on fidelity.
+</div>
+
+<p class="section-note"><strong>Operational cost, for anyone repeating this.</strong> Prefill on the
+256-token chunk the dedicated container requires: <strong>100&nbsp;s at 76K, 290&nbsp;s at 150K,
+465&nbsp;s at 200K</strong>. ExLlamaV3: 234&nbsp;s for 131K at fp16, 465&nbsp;s for 205K at q8. Five
+documents times five profiles is measured in days, not hours, and it holds a card the whole time.</p>
+
+
 <div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
     <p><sup class="fn">2</sup> Range spans baseline vLLM INT4 (~114, syv-ai) to llama.cpp Q4+MTP n=3 (~134&ndash;151, kgptalkie).</p>
     <p><sup class="fn">3</sup> SGLang SMG cache-aware routing claims +92% throughput vs round-robin on prefix-heavy workloads; actual 3090 numbers are untested. Unique-prompt throughput should match vLLM within ~2&ndash;4%.</p>
     <p><sup class="fn">3.6</sup> Measured on Qwen3.6-27B. Same hybrid architecture (GDN+softmax), same parameter count. Directly comparable for throughput; Qwen3.8 is a training improvement, not an architecture change.</p>
     <p style="margin-top: 1rem;"><strong>Key sources:</strong> syv-ai/qwen38-27b-rtx3090, tfriedel/qwen3.6-rtx3090-lab, dbirks &amp; Pilcothink HF repos, lued/Qwen3.8-27B-INT8-W8A16-MTP, kingy.ai GGUF benchmarks, kgptalkie llama.cpp guide, AtomicChat/Unsloth GGUF repos, RadixArk/Qwen3.8-27B-DSpark, SGLang GitHub (sgl-project/sglang, PR #23331), Qwen official blog.</p>
-    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;24 are this host, at a 250 W power cap.</p>
+    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization), section 25 on 31 August (context raised to 85,000; sub-4-bit closed) and sections 26&ndash;28 on 1&ndash;3 September (group-size fix and ExLlamaV3, the fidelity harness, and the long-context fidelity results). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;28 are this host, at a 250 W power cap.</p>
   </div>
 
 

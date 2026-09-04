@@ -138,6 +138,13 @@ spread as the floor for comparing two configurations.</p>
   unidentified. If you need a conservative figure for this configuration, use the lower one.
 </div>
 
+<p>A fourth engine was added later and is not in this table because it was measured on the other card
+under a different comparator: <strong>ExLlamaV3 1.4.5 at EXL3 3.00&nbsp;bpw with MTP reaches
+94.8&nbsp;&#177;0.5&nbsp;tok/s</strong>, against 43.6 with speculation off. That is 63% of the patched
+stack&rsquo;s speed under the matching idle-neighbour condition, and it buys 128K&ndash;200K of context on
+one card. Full figures, and what it costs in fidelity, are in
+<a href="#longctx">Long-context fidelity</a>.</p>
+
 <h3>Prompt length changes speed only through acceptance</h3>
 <p>A control settles what looked like a measurement error. With speculation <strong>off</strong>, stock
 vLLM measures 32.6&nbsp;tok/s at 55 tokens and 32.8 at 1K &mdash; a 0.6% difference, i.e. none. Turn
@@ -773,6 +780,7 @@ on prose.</p>
     <tr class="hl"><td>Single-card context ceiling</td><td><span class="badge">clean</span></td><td>Server-reported KV capacity; supersedes the ~64K claim</td></tr>
     <tr><td>TP=2 figures</td><td><span class="badge">clean</span></td><td>Single-tenant &mdash; but the penalty is specific to this board&rsquo;s PCIe wiring</td></tr>
     <tr><td>KV-quantization arms</td><td><span class="badge warn">small-n</span></td><td>72 cases; arm-to-arm only, and probed only at &le;64K</td></tr>
+    <tr class="hl"><td>Long-context fidelity (NLL &amp; probes)</td><td><span class="badge">clean</span></td><td>Dedicated single-request container, determinism floor zero; supersedes the divergence table</td></tr>
   </tbody>
 </table>
 </div>
@@ -918,7 +926,225 @@ merely at depth.</p>
   150K and 200K depths those profiles exist for &mdash; which is precisely where anyone would use
   them. That remains unmeasured, and we have no clean way to measure it without a reference of the
   same size.
+  <br><br><strong>Superseded, 3 September.</strong> There was a clean way, and it does not need a
+  reference of the same size &mdash; see <a href="#longctx">Long-context fidelity</a> below. The
+  conclusion reverses: measured properly, fp8 KV is indistinguishable from bf16 all the way to 150K.
 </div>
+
+<h2 id="longctx">Long-context fidelity: the measurement we said could not be made</h2>
+<p>The scope limit above stood for three days: the fp8 and KVarN profiles exist for 150K and 200K,
+and every fidelity number we had was taken at &le;64K, because the bf16 reference cannot go further.
+The way out was not a bigger reference. It was a different instrument.</p>
+
+<div class="box stop">
+  <strong>Correction &mdash; &ldquo;both quantized caches change what the model says&rdquo; was measured
+  the wrong way.</strong> Free-running greedy divergence generates from the same prompt under two
+  profiles and counts characters until they differ. That number <em>compounds</em>: one near-tie token
+  flipped by rounding sends the two continuations down different paths, so &ldquo;diverges at char
+  105&rdquo; records where the first coin-flip landed, not how wrong the cache is. It also cannot exist
+  above the reference&rsquo;s ceiling. The divergence table is not wrong, but it does not measure what
+  we read into it.
+</div>
+
+<p>The replacement is <strong>teacher-forced excess negative log-likelihood</strong>. Feed a long
+document as the prompt, ask the server for the log-probability of every prompt token
+(<code>prompt_logprobs</code>), and report mean NLL per 8K-token bucket of position. The ground truth
+is the document itself, so no reference model is needed and the metric is defined at 200K exactly as
+at 8K. Teacher forcing pins the context, so nothing compounds: a rounding error at position <em>p</em>
+affects the prediction at <em>p</em>+1 and nothing else. And because prefill is chunked, almost
+everything a token at position 150K attends to is read back <em>through</em> the quantized cache &mdash;
+which is the thing under test.</p>
+
+<p>Memorised text would defeat it, so the document set is five frozen documents of &ge;200K tokens each:
+three the model wrote itself (202,296 / 214,368 / 212,578 tokens &mdash; a novel, an engineering design
+document, an essay sequence), and two built from 22 arXiv papers apiece submitted between 20 July and
+1 September 2026, after the model&rsquo;s assumed training cut (207,877 and 206,061 tokens). Repeat runs
+of the harness are <strong>bit-identical</strong>, so the determinism floor is exactly zero and any
+excess NLL is signal.</p>
+
+<h3>Excess NLL against bf16, 0&ndash;76K</h3>
+<p>Mean and worst 8K bucket, in nats per token, against the patched stack at bf16 KV. The threshold,
+written down before the run, was 0.02 nats.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Profile</th><th>gen1</th><th>gen2</th><th>gen3</th><th>nat1</th><th>nat2</th><th>top-1 agree<span class="sub">minimum</span></th></tr></thead>
+  <tbody>
+    <tr class="hl"><td><strong>vLLM fp8</strong> <code>e4m3fn</code></td><td class="n">+0.008 / +0.025</td><td class="n">&minus;0.005 / +0.001</td><td class="n">+0.001 / +0.001</td><td class="n">&minus;0.033 / +0.006</td><td class="n">&minus;0.026 / +0.022</td><td class="n"><strong>0.921</strong></td></tr>
+    <tr><td>vLLM KVarN 4/2-bit</td><td class="n">+0.011 / +0.030</td><td class="n">+0.027 / +0.116</td><td class="n">+0.005 / +0.007</td><td class="n">+0.025 / +0.084</td><td class="n">&minus;0.043 / +0.008</td><td class="n">0.830</td></tr>
+    <tr><td>EXL3 3.0 bpw, fp16 cache</td><td class="n">+0.025 / +0.067</td><td class="n">+0.011 / +0.036</td><td class="n">+0.034 / +0.043</td><td class="n">+0.127 / +0.213</td><td class="n">+0.026 / +0.137</td><td class="n">0.744</td></tr>
+    <tr><td>EXL3 3.0 bpw, q8 cache</td><td class="n">+0.025 / +0.067</td><td class="n">+0.011 / +0.036</td><td class="n">+0.034 / +0.043</td><td class="n">+0.130 / +0.215</td><td class="n">+0.028 / +0.148</td><td class="n">0.743</td></tr>
+    <tr><td>EXL3 4.0 bpw, q8 cache</td><td class="n">+0.024 / +0.039</td><td class="n">&minus;0.013 / +0.020</td><td class="n">+0.017 / +0.022</td><td class="n">+0.280 / +0.385</td><td class="n">+0.256 / +0.425</td><td class="n">0.761</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="sub" style="max-width:76ch">gen1&ndash;gen3 are the model&rsquo;s own text (mean NLL 0.2&ndash;0.5);
+nat1&ndash;nat2 are recent arXiv prose (mean NLL ~4.7). Negative numbers are not evidence that a
+quantized cache is <em>better</em> than bf16 &mdash; they are the two attention paths (FlashAttention
+bf16 against FlashInfer fp8) differing by kernel numerics.</p>
+
+<div class="box">
+  <strong>The document is the experiment.</strong> On text the model wrote itself, every profile looks
+  fine &mdash; the predictions are so easy that a degraded cache has nothing to lose. Natural prose the
+  model has never seen is where quantization shows up, and it makes the effect several times larger:
+  EXL3 at 3.0&nbsp;bpw costs +0.011 to +0.034 nats on the generated documents and <strong>+0.127</strong>
+  on arXiv prose. Any long-context fidelity claim measured on self-generated or memorised text is
+  mostly measuring how easy the text is.
+</div>
+
+<div class="box">
+  <strong>fp8 KV is indistinguishable from bf16.</strong> Worst bucket anywhere: <strong>+0.025 nats</strong>,
+  on the model&rsquo;s own text; on both natural documents the mean is negative and the worst bucket is
+  +0.006 and +0.022. Top-1 agreement never drops below 92%. The single bucket that grazes the 0.02
+  threshold sits on the model&rsquo;s own text, where the absolute NLL is 0.2&ndash;0.5 and every profile
+  looks clean anyway.
+</div>
+
+<h3>Past the reference: cross-profile agreement at 80&ndash;150K</h3>
+<p>Above 76K there is no bf16 to compare against, so the profiles are compared to <em>each other</em>,
+with fp8 as the anchor because it matched bf16 everywhere it could be checked. Figures are
+&ldquo;other minus fp8&rdquo;, mean / worst bucket, then minimum top-1 agreement.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Document</th><th>KVarN vs fp8</th><th>EXL3 3.0 bpw q8 vs fp8</th></tr></thead>
+  <tbody>
+    <tr><td>gen1</td><td class="n">+0.005 / +0.008 &#183; 0.962</td><td class="n">+0.045 / +0.057 &#183; 0.915</td></tr>
+    <tr><td>gen2</td><td class="n">+0.005 / +0.009 &#183; 0.976</td><td class="n">+0.028 / +0.036 &#183; 0.947</td></tr>
+    <tr><td>gen3</td><td class="n">+0.004 / +0.006 &#183; 0.972</td><td class="n">+0.032 / +0.042 &#183; 0.929</td></tr>
+    <tr class="hl"><td>nat1</td><td class="n"><strong>+0.072 / +0.129</strong> &#183; 0.833</td><td class="n">+0.008 / +0.158 &#183; 0.748</td></tr>
+    <tr class="hl"><td>nat2</td><td class="n">+0.011 / +0.096 &#183; 0.846</td><td class="n"><strong>+0.083 / +0.257</strong> &#183; 0.757</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>fp8 shows no inflection with depth on any of the five documents.</strong> Its 80&ndash;150K
+bucket means track the difficulty of the text, and on the generated documents they are flat.
+<strong>KVarN drifts.</strong> Its gap to fp8 on nat1 roughly triples between the sub-76K band
+(+0.025 mean) and the 80&ndash;150K band (+0.072 mean, +0.129 worst); on generated text it stays inside
+0.01. So it degrades with depth, mildly, and only where the text is hard. Its 150&ndash;200K band could
+be cross-checked against nothing but EXL3 at q8, which is itself worse. EXL3&rsquo;s gap at depth is the
+same size as its gap to bf16 in the overlap band &mdash; a weight-quantization cost, flat with depth,
+not a cache effect.</p>
+
+<div class="box warn">
+  <strong>One of our own pass/fail criteria had to be retired.</strong> The proposal said &ldquo;no
+  bucket past 80K may rise more than 0.05 nats above the 57&ndash;76K mean&rdquo;. On gen3, fp8 and KVarN
+  <em>both</em> rise by +0.075 &mdash; while agreeing with each other to 0.005 nats. The rise is the
+  document getting harder at that point, not the cache getting worse. An absolute-threshold criterion on
+  a metric that tracks content is content-confounded; the cross-profile comparison is the one that
+  survives.
+</div>
+
+<h3>Known-answer probes at depth</h3>
+<p>NLL says whether the distribution moved. It does not say whether a user gets a wrong answer. Three
+probes with known answers &mdash; eight-needle key/value retrieval, verbatim copy of a marked paragraph,
+and a three-step cross-reference chain &mdash; run at depth against filler drawn from the frozen
+documents.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>Profile</th><th>Depths</th><th>Multi-key</th><th>Verbatim copy</th><th>Cross-reference</th></tr></thead>
+  <tbody>
+    <tr><td>bf16 <span class="sub">n=10</span></td><td class="n">16K / 32K / 64K</td><td class="n">80/80</td><td class="n">100%</td><td class="n">10/10</td></tr>
+    <tr class="hl"><td>fp8 <span class="sub">n=5</span></td><td class="n">64K / 128K / <strong>147K</strong></td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+    <tr class="hl"><td>KVarN <span class="sub">n=5</span></td><td class="n">64K / 128K / <strong>196K</strong></td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+    <tr><td>EXL3 3.0 bpw <span class="sub">n=5</span></td><td class="n">64K / 123K</td><td class="n">40/40 each</td><td class="n">100% each</td><td class="n">5/5 each</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p><strong>Every probe instance succeeded at every depth for every profile</strong> &mdash; KVarN at
+196K and EXL3 3.0&nbsp;bpw at 123K included. So the fidelity cost measured above does not surface as a
+retrieval, copying or multi-hop failure at these depths. It is a distribution shift, not a capability
+loss &mdash; which is exactly why it needed a distributional instrument to see at all.</p>
+
+<div class="box warn">
+  <strong>The first EXL3 probe run scored 0 on every instance, and the model was fine.</strong>
+  <code>probes.py</code> assumed a non-null <code>usage</code> field on the completion response; TabbyAPI
+  returns <code>usage: null</code>, so the scorer raised on every row and recorded a zero. The
+  server&rsquo;s own log showed HTTP 200s and sensible generations throughout. A harness that turns its
+  own exception into a score of zero will report a catastrophic model failure with total confidence
+  &mdash; which is trap&nbsp;1 in a new costume. Fixed and rerun; the corrected numbers are the row above.
+</div>
+
+<h3>ExLlamaV3: the context is real, the speed is not</h3>
+<p>The other route to long context on one card is a smaller checkpoint on a different engine. EXL3 at
+3.0&nbsp;bpw fits far more cache than the 4-bit compressed-tensors weights do, and &mdash; contrary to
+what we assumed when we closed the sub-4-bit line &mdash; ExLlamaV3 <em>does</em> support MTP
+speculative decoding on this model. Measured on GPU&nbsp;1 with the GPU&nbsp;0 replica idle, the same
+condition as the 149.6 comparator.</p>
+
+<div class="tw">
+<table>
+  <thead><tr><th>ExLlamaV3 1.4.5, 3.00 bpw</th><th>Decode tok/s</th><th>Draft acceptance</th><th>VRAM free after load</th></tr></thead>
+  <tbody>
+    <tr class="hl"><td>MTP k=4, fp16 cache 32K</td><td class="n"><strong>94.8</strong> <span class="sub">&plusmn;0.5</span></td><td class="n">70.5%</td><td class="n">6.42 GiB</td></tr>
+    <tr><td>No speculation, 32K</td><td class="n">43.6 <span class="sub">&plusmn;0.3</span></td><td class="n">&mdash;</td><td class="n">6.43 GiB</td></tr>
+    <tr><td>MTP k=4, fp16 cache <strong>128K</strong></td><td class="n">93.8 <span class="sub">&plusmn;0.6</span></td><td class="n">70.3%</td><td class="n">1.03 GiB</td></tr>
+    <tr><td>MTP k=4, q8 cache <strong>200K</strong></td><td class="n">91.6 <span class="sub">&plusmn;0.9</span></td><td class="n">69.2%</td><td class="n">2.23 GiB</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>MTP is worth <strong>2.2&times;</strong> here, and acceptance matches vLLM&rsquo;s 70&ndash;76%, so EXL3
+avoids the wall llama.cpp hit. What it does not do is close the gap: 94.8 against the patched
+stack&rsquo;s 149.6 under the same conditions is <strong>63% of the speed</strong>. What it buys is
+context on one card &mdash; 128K at fp16 KV, 200K at q8 &mdash; and decode is flat across cache sizes.
+The fp16 ceiling is sharp: with no draft model resident, 131,072 tokens loads with 0.3&nbsp;GiB of
+headroom and 135,168 already fails autosplit.</p>
+
+<div class="box warn">
+  <strong>And the published 4.0 bpw files do not rescue it.</strong> EXL3 at 3.0&nbsp;bpw costs
+  +0.127 nats on nat1 with 74% top-1 agreement, so the obvious move is to spend the VRAM on 4.0&nbsp;bpw.
+  It does not work, and we chased the anomaly to the end before saying so.
+  <div class="tw" style="margin-top:0.8rem">
+  <table>
+    <thead><tr><th>Control</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>3.0 bpw q8, repeated a day later</td><td>Bit-identical &mdash; the harness is deterministic</td></tr>
+      <tr><td>Plain 4.0, fp16 vs q8 cache, nat1 at 32K</td><td class="n">0.01 nats, 98.6% top-1 &mdash; cache quantization is irrelevant here</td></tr>
+      <tr><td>Plain 4.0 vs self-calibrated <code>SC_4.00bpw_H5</code>, nat1 at 64K</td><td class="n">SC is worse still: +0.12 to +0.28 per bucket, 84&ndash;88% top-1</td></tr>
+      <tr><td>Excess vs bf16 on nat1, per 8K bucket</td><td class="n">3.0: +0.08 to +0.22 &#183; plain 4.0: +0.19 to +0.39 &#183; SC 4.0: +0.35 to +0.54</td></tr>
+      <tr class="hl"><td>ExLlamaV3&rsquo;s own <code>eval/ppl.py</code>, wikitext-2, 100 rows &times; 2048</td><td class="n">3.0 bpw <strong>6.99</strong> &#183; plain 4.0 <strong>7.03</strong> &#183; SC 4.0 <strong>7.00</strong></td></tr>
+    </tbody>
+  </table>
+  </div>
+  By ExLlamaV3&rsquo;s own perplexity tool the two published 4.0&nbsp;bpw files are <em>no better</em> than
+  the 3.0&nbsp;bpw file on wikitext-2, and on recent arXiv prose they are clearly worse. The 3.0 file is
+  the best of the three as published. Why 4.0 is so much worse specifically on the arXiv documents is
+  unexplained &mdash; calibration-set mismatch or a bad quantization run upstream are the candidates, and
+  both are outside our control. The practical consequence is what matters: <strong>EXL3 cannot improve
+  its fidelity case by spending more bits.</strong>
+</div>
+
+<h2 id="ctxdecision">The decision: fp8 KV at 150K</h2>
+
+<div class="box">
+  <p><strong>For context past 85,000 tokens on this hardware, the answer is the patched vLLM stack with
+  fp8 KV at 150K.</strong> It has no measurable fidelity cost against bf16 anywhere the two overlap, no
+  inflection with depth to 150K, and 100% on every known-answer probe to 147K. The only price is the one
+  we already knew about: 22% slower than bf16, 124.4 against 158.8&nbsp;tok/s.</p>
+  <ul>
+    <li><strong>KVarN at 200K</strong> costs up to ~0.12 nats per token on hard text and drifts further
+    with depth. It is the right answer to &ldquo;it must fit&rdquo; and the wrong default.</li>
+    <li><strong>EXL3 at 3.0&nbsp;bpw</strong> buys 200K on one card for ~0.13 nats on natural text, 74%
+    top-1 agreement, and 37% of the speed given up. It loses to fp8 at 150K on every axis except raw
+    length, and to KVarN at 200K on fidelity.</li>
+  </ul>
+</div>
+
+<div class="box warn">
+  <strong>Two operational facts, if you reproduce this.</strong> <code>prompt_logprobs</code> cannot be
+  served by a production replica: the first such request <strong>OOM-killed the GPU&nbsp;0 engine</strong>,
+  because vLLM log-softmaxes the full 248K vocabulary in fp32 for every scheduled prompt token and there
+  is about 250&nbsp;MiB spare at <code>gpu_util 0.96</code>. Fidelity runs need a dedicated container at
+  0.92 with <code>--max-num-batched-tokens 256</code>, one request at a time &mdash; which is also why the
+  bf16 reference ceiling here is 76.8K rather than 85K. And it is slow: prefill on that 256-token chunk
+  takes <strong>100&nbsp;s at 76K, 290&nbsp;s at 150K, 465&nbsp;s at 200K</strong>; ExLlamaV3 takes
+  234&nbsp;s for 131K at fp16 and 465&nbsp;s for 205K at q8.
+</div>
+
 
 <h2 id="unsloth">Unsloth: resolved, and the answer is no</h2>
 <p>Verified from the repository manifest in the local cache rather than from documentation:

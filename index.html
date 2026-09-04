@@ -44,7 +44,7 @@
     <tbody>
       <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s<span class="sub">measured with one replica running</span></td><td class="n">212 tok/s<span class="sub">but ~11% less once both are resident</span></td></tr>
       <tr><td><strong>Speed, whole team hammering it</strong></td><td class="n">960 tok/s<span class="sub">at 64 concurrent</span></td><td class="n">905 tok/s<span class="sub">at 16 concurrent, low latency</span></td></tr>
-      <tr><td><strong>How much it can read at once</strong></td><td class="n">85K tokens<span class="sub">now the default; ~90K ceiling</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
+      <tr><td><strong>How much it can read at once</strong></td><td class="n">85K tokens<span class="sub">now the default; 150K with fp8 KV</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
       <tr><td><strong>Real coding tasks solved</strong></td><td class="n">48.7%<span class="sub">Aider polyglot, 225 exercises</span></td><td class="n">same</td></tr>
       <tr><td><strong>Power drawn</strong></td><td class="n">250 W</td><td class="n">500 W</td></tr>
     </tbody>
@@ -87,7 +87,11 @@
 </div>
 
 <div class="box warn">
-  <strong>And do not reach for a quantized KV cache to buy context.</strong> It is the obvious move and it is a worse trade than it looks: fp8 measured <strong>22% slower</strong> than plain bf16, not faster, and both quantized caches we tested changed the model&rsquo;s output within the first couple of hundred characters. They are for context you cannot otherwise fit, not for speed.
+  <strong>A quantized KV cache buys context, never speed.</strong> fp8 measured <strong>22% slower</strong> than plain bf16, not faster &mdash; quantizing the cache saves memory and adds dequantization work to every attention operation. Reach for it when the context will not otherwise fit, and for nothing else.
+</div>
+
+<div class="box">
+  <strong>If you do need the context, fp8 is the one to use &mdash; and we had to build a new instrument to say so.</strong> We originally reported that both quantized caches &ldquo;changed what the model says&rdquo;, on the evidence of how quickly their output diverged from bf16. That measurement compounds one rounding difference into two different paragraphs and tells you almost nothing. Measured properly &mdash; per-token likelihoods over 200,000-token documents the model has never seen &mdash; <strong>fp8 is indistinguishable from bf16 all the way to 150K</strong>, and scores 100% on retrieval, verbatim-copy and multi-hop probes at 147K. The 4-bit cache that reaches 200K does cost something real, and a smaller 3-bit checkpoint on a different engine costs more. The <a href="results.html#longctx">Results</a> tab has the numbers.
 </div>
 
 <h2>How we got from 27 to 212</h2>

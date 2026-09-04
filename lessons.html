@@ -30,7 +30,7 @@
 
 <p class="lede">Every finding on this site came from a machine where a benchmark can be wrong in at least six ways without anything failing. No exception was thrown, no HTTP error returned, no log line printed. In each case the number looked entirely reasonable. That is the hazard: a broken measurement does not announce itself, it just quietly reads a bit high or a bit low, and you publish it.</p>
 
-<h2>Nine ways to measure the wrong thing</h2>
+<h2>Twelve ways to measure the wrong thing</h2>
 <p>Each of these cost real time here. They are ordered by how much damage they did.</p>
 
 <div class="box warn">
@@ -86,6 +86,41 @@
   only the flattering one would have overstated what the deployment delivers by a ninth.
 </div>
 
+<div class="box warn">
+  <strong>10. A diagnostic request that kills the server.</strong> Asking a production replica for
+  <code>prompt_logprobs</code> &mdash; the per-token probabilities the whole long-context fidelity study
+  depends on &mdash; <strong>OOM-killed the GPU&nbsp;0 engine on the first request</strong>, and Docker
+  restarted it under us. vLLM log-softmaxes the full 248K-entry vocabulary in fp32 for every scheduled
+  prompt token; at <code>gpu_util 0.96</code> there is roughly 250&nbsp;MiB of slack, and the tensor is
+  far larger than that. Nothing about the API says this. The fix is not a flag but a second machine
+  shape: fidelity runs use a dedicated one-off container at <code>gpu_util 0.92</code> with
+  <code>--max-num-batched-tokens 256</code>, prefix caching off, one request in flight. The cost of that
+  headroom is a lower ceiling &mdash; the bf16 reference tops out at 76.8K instead of 85K &mdash; which is
+  itself a number you have to publish, because it defines the band in which a reference exists at all.
+</div>
+
+<div class="box warn">
+  <strong>11. <code>docker compose up -d &lt;service&gt;</code> recreates its dependencies.</strong> The
+  load balancer <code>depends_on</code> both replicas. Bringing up just the balancer while a one-off
+  fidelity container held port 18021 failed on GPU&nbsp;1 as expected &mdash; and
+  <strong>silently recreated the healthy GPU&nbsp;0 replica on the way</strong>. Three minutes of outage
+  and every in-flight request lost, from a command that named one service and touched three. Use
+  <code>--no-deps</code> for any single service whenever a test container is occupying a card.
+</div>
+
+<div class="box warn">
+  <strong>12. A scorer that records its own exception as a zero.</strong> The depth probes against
+  ExLlamaV3 came back <strong>0 out of 8 on every retrieval, 0 characters copied, 0 cross-references,
+  at every depth</strong> &mdash; a total collapse, exactly the shape you would expect if 3-bit weights
+  had destroyed long-context ability. The model was fine. The scorer read a <code>usage</code> field
+  that this server returns as <code>null</code>, raised an <code>AttributeError</code> on every row, and
+  wrote the failure down as a score. The server&rsquo;s own log showed HTTP&nbsp;200 and sensible
+  generations the whole time. This is the first trap in a new costume: <em>a harness that cannot read
+  its own results will confidently report a model that cannot answer</em>. Score zero and score
+  &ldquo;could not score&rdquo; must be different values, and any zero should be checked against the
+  server&rsquo;s log before it is believed.
+</div>
+
 <h2>Know your noise floor &mdash; it is three different numbers</h2>
 <p>&ldquo;Noise&rdquo; here is not one quantity, and conflating the three leads to both false positives and false confidence.</p>
 
@@ -102,6 +137,85 @@
 
 <div class="box">
   <strong>Treat single-stream differences under about 5% as noise</strong> &mdash; including ours. Correctness is noisier still: two runs of the same 225-case suite at temperature&nbsp;0, nominally deterministic, differed by <strong>2 points in aggregate and 13 points on one language</strong>. Batch composition varies under concurrency, which changes reduction order and flips near-tie tokens. Aggregate scores resolve to roughly &plusmn;2 points; per-language scores only to about &plusmn;10.
+</div>
+
+<h2 id="method">The instrument can be the error, not the reading</h2>
+<p>Every trap above is a way of measuring the right quantity badly. This one is worse: measuring a
+quantity that was never the one in question, carefully, and publishing it.</p>
+
+<p>We wanted to know whether a quantized KV cache changes what the model believes at depth. What we
+measured for a week was <strong>free-running greedy divergence</strong>: generate from the same prompt
+under bf16 and under fp8, count characters until the two outputs differ. It is a natural thing to
+measure and it is almost useless, for two reasons.</p>
+
+<ul>
+  <li><strong>It compounds.</strong> Every generated token feeds the next. One near-tie flipped by
+  rounding at character 105 sends the two continuations down permanently different paths. The number
+  records where the first coin-flip landed, not how wrong the cache is &mdash; and it will land early
+  whatever the cache does, because there is always a near-tie early.</li>
+  <li><strong>It cannot reach the depths that matter.</strong> It is defined only where the bf16
+  reference exists. The fp8 and KVarN profiles exist for 150K and 200K precisely because bf16 cannot
+  go there, so the instrument is blind at exactly the depths the profiles are for.</li>
+</ul>
+
+<div class="box">
+  <strong>The replacement has three properties the old one lacked.</strong> Teacher-forced per-token
+  NLL over a long document needs <em>no reference model</em> &mdash; the ground truth is the document,
+  so the metric is defined at 200K exactly as at 8K. It does not compound, because teacher forcing pins
+  the context and an error at one position cannot propagate. And where a reference does exist, the same
+  run yields excess NLL against it, so the old band and the new one are on the same scale. Repeat runs
+  came out bit-identical: a determinism floor of exactly zero, which means any excess at all is signal.
+</div>
+
+<p>Above the reference ceiling the trick is to stop looking for ground truth and compare
+<strong>independent quantizations against each other</strong>. Two schemes that fail differently will
+disagree; two that are both faithful will agree. fp8 and KVarN agree to 0.005 nats on the model&rsquo;s
+own text at 150K, which is the strongest statement available about a depth where nothing can be
+checked directly.</p>
+
+<div class="box stop">
+  <strong>And then one of our own pre-registered criteria turned out to be confounded.</strong> We wrote
+  the pass/fail thresholds down <em>before</em> running, which is the right discipline and is not
+  sufficient. Criterion B said: no 8K bucket past 80K may exceed the 57&ndash;76K mean by more than 0.05
+  nats. On one document, fp8 and KVarN both breached it by +0.075 &mdash; while agreeing with
+  <em>each other</em> to 0.005 nats. The document simply got harder at that point. An absolute threshold
+  on a metric that also tracks content will fire on the content. We retired the criterion rather than
+  reporting two false failures, and kept the reference-free comparison, which is immune to it because
+  both arms read the same words.
+</div>
+
+<h2 id="degeneration">What a 27B model does when you ask it for 200,000 tokens</h2>
+<p>The fidelity study needed documents the model could not have memorised, so we had it write three of
+them &mdash; a novel, an engineering design document and an essay sequence, at 200K tokens each, by
+chaining continuation requests. That turned into a study of its own, because a model asked for that
+much text does not fail by producing nonsense. It fails by winding down into one of four modes, each of
+which reads fine for a paragraph.</p>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Mode</th><th>What it looks like</th><th>Why the obvious check misses it</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Chant</strong></td><td>The section ends in an accelerating run of one-line paragraphs &mdash; &ldquo;A bridge to the stars. / A bridge to the unknown.&rdquo;</td><td>Every line is novel text; nothing repeats</td></tr>
+      <tr><td><strong>Staccato</strong></td><td>Sentences collapse to four to six words and stay there</td><td>Vocabulary stays rich; only the mean sentence length moves</td></tr>
+      <tr><td><strong>Anaphora</strong></td><td>Every sentence in a paragraph opens the same way &mdash; &ldquo;He thought about the X. He thought about the Y.&rdquo;</td><td>Lexically varied, so n-gram and distinct-word tests pass it</td></tr>
+      <tr><td><strong>Replay</strong></td><td>The model reproduces the excerpt it was handed, at length, before carrying on</td><td>The replay starts thousands of tokens back, so &ldquo;does the chunk start where the document ended&rdquo; is false</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p>All four are <em>self-seeding</em>: leave one in the document and the next continuation, which is
+handed that tail as context, does more of it. So detection alone is not enough &mdash; the trailing run
+has to be trimmed off before the text is kept, or the mode propagates. The detector that resulted
+rejects a chunk on internal n-gram repetition, distinct-word ratio, mean sentence length, one-line
+paragraph fraction, and overlap with earlier text, and separately trims chant and anaphora off the tail.</p>
+
+<div class="box">
+  <strong>The rejection rate is a finding in itself.</strong> At the same temperature and top_p, the novel kept
+  <strong>167 of 225</strong> rounds and the essay sequence <strong>128 of 170</strong> &mdash; roughly a
+  quarter of all generations discarded &mdash; while the technical design document kept
+  <strong>47 of 48</strong>. Long-form fiction and free-form argument wind down; a document with real
+  structure to fill in does not. If you are generating long text with this model, giving it a concrete
+  next thing to specify is worth more than any sampling parameter.
 </div>
 
 <h2>The instrument</h2>
@@ -217,6 +331,32 @@ finding, as we first assumed &mdash; it is an x4-behind-the-chipset finding, spe
   single-card ceiling instead. The real fix is hardware &mdash; moving GPU&nbsp;1 to a CPU-attached
   slot &mdash; not configuration. Note that <code>NCCL_P2P_DISABLE</code> buys nothing here, because
   P2P was already unavailable.
+</div>
+
+<h2 id="groupsize">A fix that worked, on a checkpoint not worth deploying</h2>
+<p>A community checkpoint (<code>cyankiwi/Qwen3.8-27B-AWQ-INT4</code>, group-32 and asymmetric) had
+failed to load, and we spent a while believing the group size was a vLLM limitation. It was not:
+vLLM&rsquo;s Marlin kernel advertises <code>MARLIN_SUPPORTED_GROUP_SIZES = [-1, 32, 64, 128]</code>. The
+failure was our own preparation scripts, three of which hard-coded <code>GROUP = 128</code> while vLLM
+sized the expected scale tensor from what the checkpoint <em>declared</em> &mdash;
+<code>size of tensor a (160) must match tensor b (40)</code>, which is 5120/32 against 5120/128.</p>
+
+<p>The scripts now derive the group size from the checkpoint&rsquo;s own <code>config.json</code>, and
+the fix is verified end to end: all three prep stages derived group&nbsp;32, passed their round-trip
+gates, and the checkpoint <strong>served through the fast stack</strong> at 139.5&nbsp;&plusmn;0.2 tok/s
+with 72.8% draft acceptance and coherent output. A second checkpoint assumption fell out on the way &mdash;
+the draft-vocabulary builder expected a <code>model_extra_tensors.safetensors</code> shard that only our
+own checkpoint ships, and now creates it when absent.</p>
+
+<div class="box warn">
+  <strong>And the checkpoint is still the wrong one for this card.</strong> Its <code>ignore</code> list
+  leaves all 48 GDN layers&rsquo; <code>in_proj_a</code>/<code>in_proj_b</code> in bf16, so the weights
+  take <strong>16.46&nbsp;GiB</strong> against our AutoRound build&rsquo;s <strong>13.97&nbsp;GiB</strong>,
+  and group-32 scales are four times the size of group-128 scales. It could not even start at the 64K
+  default &mdash; <em>&ldquo;4.68 GiB KV cache is needed, 2.9 GiB available, estimated maximum model
+  length 38016&rdquo;</em>. A finer group size does not make a smaller file. The value of the exercise was
+  not a new checkpoint; it was proving that the preparation pipeline is <strong>checkpoint-agnostic</strong>,
+  which is what makes the next one cheap to try.
 </div>
 
 <h2>Provenance</h2>
