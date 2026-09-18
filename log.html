@@ -2578,6 +2578,37 @@ run are the candidates, both outside our control.</p>
 documents times five profiles is measured in days, not hours, and it holds a card the whole time.</p>
 
 
+<h2 id="swift">29. Swift-Qwen3.8-27B: Does the Shorter-Thinking Claim Hold? <span class="badge">11&ndash;18 SEP</span></h2>
+
+<p>A Reddit post and model card (<code>ukisai/Swift-Qwen3.8-27B</code>) claimed 46&ndash;58% fewer thinking tokens at
+under a point of accuracy cost, with LiveCodeBench v6 rising 76.8 &rarr; 81.6%. Plan A was to requantize the bf16
+weights with the base checkpoint&rsquo;s AutoRound recipe and serve both through patched vLLM. It was abandoned before
+running: the 55&nbsp;GB download died once on a DNS outage, the link ran at 4&ndash;10&nbsp;MB/s, and GGUFs already
+existed. Plan B: bartowski had quantized <em>both</em> models with the same release and a byte-identical calibration
+file, which is a cleaner pairing than anything we could have produced.</p>
+
+<p>Served through the official llama.cpp CUDA image on GPU&nbsp;1: Q4_K_M, two slots of 40K, q8_0 KV,
+<code>--spec-type draft-mtp</code> (85 of 94 drafts accepted on a probe), 56&nbsp;tok/s single-stream, 20.5&nbsp;GB.
+First attempt at the full 225-exercise Aider set ran 17 hours and completed nine exercises &mdash; the timeout loop
+described in <a href="lessons.html#swift">Lessons</a>. Restarted as a chain on one card, arm after arm: LiveCodeBench
+base (5.2&nbsp;h), LiveCodeBench Swift (4.3&nbsp;h), Aider base (4.9&nbsp;h of requests, 9.6&nbsp;h summed exercise
+time), Aider Swift (2.8&nbsp;h), LiveCodeBench with the author&rsquo;s own quant (4.4&nbsp;h).</p>
+
+<div class="box">
+  <strong>Decision: Swift is the model to run when thinking is on.</strong> Median output tokens &minus;50% on
+  LiveCodeBench and &minus;53% per Aider request, accuracy at parity (identical on every problem neither model
+  truncated), 43% less time on agentic work even at llama.cpp speed. Both models now sit behind one endpoint
+  with an njs router picking the card from the request&rsquo;s <code>model</code> field. The base model on patched
+  vLLM stays the answer for thinking-off and latency-bound work. Numbers and caveats:
+  <a href="results.html#swift">Results</a>.
+</div>
+
+<p class="section-note"><strong>Router bug found on the way.</strong> The first njs router used
+<code>js_set</code> + <code>proxy_pass http://$var</code>. nginx evaluates that variable before reading the request
+body, so <code>requestText</code> was empty, every request went to the base card, and a Swift request came back 404
+from vLLM. Fixed with a <code>js_content</code> handler and <code>internalRedirect</code>.</p>
+
+
 <div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
     <p><sup class="fn">2</sup> Range spans baseline vLLM INT4 (~114, syv-ai) to llama.cpp Q4+MTP n=3 (~134&ndash;151, kgptalkie).</p>

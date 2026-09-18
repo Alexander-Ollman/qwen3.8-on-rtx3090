@@ -24,11 +24,85 @@
 <main class="wrap">
 
 <header class="hero">
-  <p class="kicker">Field notes · 2× RTX 3090 · August 2026</p>
+  <p class="kicker">Field notes · 2× RTX 3090 · August&ndash;September 2026</p>
   <h1>The AI Frontier: No Datacenter Required</h1>
   <p class="subtitle">Running Qwen3.8-27B optimally on an RTX 3090</p>
-  <p class="standfirst">212 tokens a second on a graphics card you can buy secondhand. Here is what that gets you, what it cost to get there, and whether it is worth your weekend.</p>
+  <p class="standfirst">212 tokens a second on a graphics card you can buy secondhand, and a fine-tune that halves how long it thinks without costing it an answer. Here is what that gets you, what it cost to get there, and whether it is worth your weekend.</p>
 </header>
+
+
+<section id="best" class="section">
+<p class="kicker">Update &#183; 18 September 2026</p>
+<h2 style="margin-top:.2rem">The best way to serve it, and the best way to use it</h2>
+
+<p class="lede">Three weeks of measurement come down to two decisions. <strong>Serve it through patched vLLM</strong>: that is the 212&nbsp;tokens a second below, 7.7&times; the out-of-the-box install. And <strong>when you turn thinking on, run the Swift fine-tune instead of the base weights</strong>: it reaches the same answers on about half the reasoning, which on real coding work is the difference between a nine-hour job and a five-hour one.</p>
+
+<div class="stats">
+  <div class="stat"><div class="v">212<small>tok/s</small></div><div class="l">base model, patched vLLM, thinking off</div></div>
+  <div class="stat"><div class="v">&minus;50<small>%</small></div><div class="l">median output tokens with Swift, LiveCodeBench</div></div>
+  <div class="stat"><div class="v">&minus;57<small>%</small></div><div class="l">median reasoning per request with Swift, Aider</div></div>
+  <div class="stat"><div class="v">37&nbsp;=&nbsp;37</div><div class="l">problems solved where neither model ran out of room</div></div>
+  <div class="stat"><div class="v">9.6&rarr;5.5<small>h</small></div><div class="l">same 36 coding tasks, time spent</div></div>
+</div>
+
+<p>The second decision is new. Qwen3.8-27B with thinking on is a better programmer than with it off, and it is also exhausting: given a coding exercise, the base model wrote a <strong>median of 17,900 tokens</strong> to get through it, on the hard ones 20,000 to 28,000 for a single reply, and one request in thirteen ran into the 32,768-token ceiling and returned nothing at all. <a href="https://huggingface.co/ukisai/Swift-Qwen3.8-27B">Swift-Qwen3.8-27B</a> is a fine-tune by UkisAI that penalises the tokens associated with that spiralling. Its author claims 46&ndash;58% fewer thinking tokens for under a point of accuracy. We gave both models the same problems under the author&rsquo;s own conditions, with the quantization held identical, to see whether that survives contact with somebody else&rsquo;s hardware. It does.</p>
+
+<figure class="fig">
+  <figcaption>How much each model writes before it answers &#183; lower is better</figcaption>
+  <svg class="chart" viewBox="0 0 760 214" role="img" aria-labelledby="sw-t">
+<title id="sw-t">Median output tokens per answer, base Qwen3.8-27B against Swift, thinking on</title>
+<line class="grid" x1="276.0" x2="276.0" y1="16" y2="170"/>
+<text class="tick" x="276.0" y="186" text-anchor="middle">0</text>
+<line class="grid" x1="366.9" x2="366.9" y1="16" y2="170"/>
+<text class="tick" x="366.9" y="186" text-anchor="middle">4,000</text>
+<line class="grid" x1="457.8" x2="457.8" y1="16" y2="170"/>
+<text class="tick" x="457.8" y="186" text-anchor="middle">8,000</text>
+<line class="grid" x1="548.6" x2="548.6" y1="16" y2="170"/>
+<text class="tick" x="548.6" y="186" text-anchor="middle">12,000</text>
+<line class="grid" x1="639.5" x2="639.5" y1="16" y2="170"/>
+<text class="tick" x="639.5" y="186" text-anchor="middle">16,000</text>
+<text class="axlbl" x="485" y="208" text-anchor="middle">median output tokens per answer &#183; thinking on &#183; same 4-bit quantization</text>
+<path class="bar b-floor" d="M276,20 L593.4,20 Q598.4,20 598.4,25 L598.4,39 Q598.4,44 593.4,44 L276,44 Z"/>
+<text class="rowlbl" x="264" y="36.0" text-anchor="end">LiveCodeBench v6 · base</text>
+<text class="rowval b-floor" x="606.4" y="36.0">14,190</text>
+<path class="bar b-top" d="M276,55 L430.8,55 Q435.8,55 435.8,60 L435.8,74 Q435.8,79 430.8,79 L276,79 Z"/>
+<text class="rowlbl" x="264" y="71.0" text-anchor="end">LiveCodeBench v6 · Swift</text>
+<text class="rowval b-top" x="443.8" y="71.0">7,035</text>
+<path class="bar b-floor" d="M276,90 L382.8,90 Q387.8,90 387.8,95 L387.8,109 Q387.8,114 382.8,114 L276,114 Z"/>
+<text class="rowlbl" x="264" y="106.0" text-anchor="end">Aider, per request · base</text>
+<text class="rowval b-floor" x="395.8" y="106.0">4,923</text>
+<path class="bar b-top" d="M276,125 L324.1,125 Q329.1,125 329.1,130 L329.1,144 Q329.1,149 324.1,149 L276,149 Z"/>
+<text class="rowlbl" x="264" y="141.0" text-anchor="end">Aider, per request · Swift</text>
+<text class="rowval b-top" x="337.1" y="141.0">2,337</text>
+</svg>
+</figure>
+
+<div class="tw">
+  <table>
+    <thead><tr><th>Same problems, thinking on</th><th>Base Qwen3.8-27B</th><th>Swift</th></tr></thead>
+    <tbody>
+      <tr><td><strong>LiveCodeBench v6</strong><span class="sub">60 problems, one attempt each</span></td><td class="n">63.3%</td><td class="n">71.7%</td></tr>
+      <tr><td>&nbsp;&nbsp;output tokens, median</td><td class="n">14,190</td><td class="n">7,035<span class="sub">&minus;50%</span></td></tr>
+      <tr><td>&nbsp;&nbsp;answers cut off at the 32K ceiling</td><td class="n">19 of 60</td><td class="n">14 of 60</td></tr>
+      <tr><td><strong>Aider polyglot</strong><span class="sub">36 fixed exercises, two attempts</span></td><td class="n">69.4%</td><td class="n">66.7%</td></tr>
+      <tr><td>&nbsp;&nbsp;reasoning tokens per request, median</td><td class="n">4,678</td><td class="n">1,994<span class="sub">&minus;57%</span></td></tr>
+      <tr><td>&nbsp;&nbsp;time spent on the whole set<span class="sub">summed per exercise, two at a time</span></td><td class="n">9.6 h</td><td class="n">5.5 h</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p><strong>Read the accuracy row carefully, because it flatters Swift for the wrong reason.</strong> Not one answer that hit the 32K ceiling passed, from either model. On the 40 LiveCodeBench problems where neither ran out of room, the score is identical: 37 and 37. Swift is not a better programmer. It is the same programmer who finishes the thought, and on hard problems finishing is most of the battle. The Aider result, where the ceiling bites less, shows the honest picture: parity, inside the noise of a 36-problem sample.</p>
+
+<div class="box">
+  <strong>What to run.</strong> Thinking off, or latency above all: the base model on patched vLLM, 212&nbsp;tok/s.
+  Thinking on: Swift, which today means its GGUF through llama.cpp at about 55&nbsp;tok/s &mdash; a third of the
+  decode speed, and still <strong>43% less time</strong> on agentic work because it writes half as much. On this
+  box both now sit behind one endpoint and the request&rsquo;s <code>model</code> field picks the card.
+  Nobody has published a 4-bit vLLM checkpoint of Swift; when one exists the two wins stack, and that combination is
+  unmeasured. Sample sizes are 60 and 36 with one seed, so treat the pass rates as &plusmn;12 points and the token
+  reductions as solid. <a href="results.html#swift">Full method and numbers&nbsp;&rarr;</a>
+</div>
+</section>
 
 <p class="lede">A little under two years ago, running a 27-billion-parameter language model meant renting time on somebody else's datacenter and hoping the bill stayed reasonable. Today it means a used RTX 3090 — about the price of a decent secondhand motorbike — sitting under your desk, answering faster than you can read, with nothing you type ever leaving the building.</p>
 

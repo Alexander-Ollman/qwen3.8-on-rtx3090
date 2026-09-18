@@ -194,6 +194,56 @@ docker compose --profile single up -d     # one or a few users
   <strong>The two cards are not identical.</strong> In the same configuration, one measured 5–10% slower than the other, reproducibly, and we never isolated why. If you compare two settings by running one on each card, swap them halfway and average — otherwise you cannot separate "this setting is faster" from "this card is faster".
 </div>
 
+<h2 id="swift">Thinking on? Serve Swift beside it</h2>
+
+<p>With thinking enabled the base model spends most of its output reasoning, and
+<a href="results.html#swift">Swift-Qwen3.8-27B reaches the same answers on about half of it</a>. There is no 4-bit
+vLLM checkpoint of Swift yet, so it runs as a GGUF through llama.cpp. Q4_K_M is the size that leaves a 24&nbsp;GB card
+room for two 40K slots; Q6_K (22.8&nbsp;GB) does not fit with usable context.</p>
+
+<pre><code>hf download ukisai/Swift-Qwen3.8-27B-GGUF Swift-Qwen3.8-27B-Q4_K_M.gguf --local-dir models/gguf
+
+docker run -d --name swift --gpus '"device=1"' --ipc=host -p 18021:18021 \
+  -v $PWD/models/gguf:/models:ro ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/Swift-Qwen3.8-27B-Q4_K_M.gguf --alias swift-qwen3.8-27b \
+  --host 0.0.0.0 --port 18021 --api-key $KEY \
+  -ngl 99 -fa on -ctk q8_0 -ctv q8_0 \
+  -c 81920 -np 2 \                       # two slots of 40K: a 32K thinking answer plus its prompt
+  --spec-type draft-mtp --spec-draft-n-max 1 \
+  --reasoning-format deepseek --jinja     # thinking arrives in reasoning_content, not content</code></pre>
+
+<p>About 55&nbsp;tok/s for one user, 20.5&nbsp;GB of VRAM. To put both models behind one endpoint, route on the
+request&rsquo;s <code>model</code> field. nginx cannot read a JSON body from plain config, and a <code>js_set</code>
+variable used in <code>proxy_pass</code> is evaluated <em>before</em> the body has been read &mdash; every request
+falls through to the default upstream and the wrong model answers with a 404. Read the body in a content handler
+and redirect internally instead:</p>
+
+<pre><code># router.js
+function route(r) {
+  var m = ""; try { m = JSON.parse(r.requestText).model || ""; } catch (e) {}
+  var up = m.toLowerCase().indexOf("swift") !== -1 ? "swift" : "base";
+  r.internalRedirect("/_" + up + r.uri);
+}
+export default { route };
+
+# nginx.conf (http block; image nginx:1.27-alpine ships the njs module)
+load_module modules/ngx_http_js_module.so;
+js_import router.js;
+upstream base  { server replica-gpu0:18020; }
+upstream swift { server replica-gpu1:18021; }
+server {
+  listen 18000;
+  client_max_body_size 32m; client_body_buffer_size 32m;   # body must be in memory for requestText
+  location / { js_content router.route; }
+  location ^~ /_base/  { internal; rewrite ^/_base(/.*)$  $1 break; proxy_pass http://base;
+                         proxy_buffering off; proxy_read_timeout 1800s; }
+  location ^~ /_swift/ { internal; rewrite ^/_swift(/.*)$ $1 break; proxy_pass http://swift;
+                         proxy_buffering off; proxy_read_timeout 7200s; }
+}</code></pre>
+
+<p>Set client timeouts generously on the Swift side. A 32K-token answer at 25&ndash;55&nbsp;tok/s is ten to twenty
+minutes, and most OpenAI clients give up at ten.</p>
+
 <h2>What fits in 24 GB</h2>
 
 <div class="tw">

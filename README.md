@@ -4,6 +4,21 @@
 
 **Read it:** https://alexander-ollman.github.io/qwen3.8-on-rtx3090/
 
+## September update: the best way to use it with thinking on
+
+[Swift-Qwen3.8-27B](https://huggingface.co/ukisai/Swift-Qwen3.8-27B) is a fine-tune that claims ~50% fewer thinking tokens for under a point of accuracy. Tested against the base model with quantization held identical (bartowski Q4_K_M of both, llama.cpp, thinking on, 32K cap):
+
+| Same problems, thinking on | Base | Swift |
+|---|---|---|
+| LiveCodeBench v6 (60 problems) pass@1 | 63.3% | 71.7% |
+| — median output tokens | 14,190 | **7,035 (−50%)** |
+| — answers cut off at the cap | 19 | 14 |
+| Aider polyglot (36 exercises) solved | 69.4% | 66.7% |
+| — median reasoning tokens per request | 4,678 | **1,994 (−57%)** |
+| — time spent (summed per exercise) | 9.6 h | **5.5 h** |
+
+The token claim holds. The accuracy gain is an artefact of the output cap: no truncated answer passed, and on problems neither model truncated the score is identical (37 vs 37). **Serve the base model through patched vLLM when thinking is off; run Swift when it is on.** Small samples, one seed: pass rates are ±12 points.
+
 ## Headline numbers (single RTX 3090, 4-bit, 1K-token prompt)
 
 | Configuration | Decode tok/s |

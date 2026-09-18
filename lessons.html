@@ -359,6 +359,30 @@ own checkpoint ships, and now creates it when absent.</p>
   which is what makes the next one cheap to try.
 </div>
 
+<h2 id="swift">A benchmark that looped for ten hours, and a score that flattered the winner</h2>
+
+<p>Testing the <a href="results.html#swift">Swift fine-tune</a> against the base model with thinking on produced two
+traps worth writing down, one in the harness and one in the result.</p>
+
+<p><strong>The harness.</strong> Aider&rsquo;s benchmark does not stream, and its request timeout is a module constant:
+600 seconds. With thinking on, the base model writes 17,000&ndash;28,000 tokens for one reply on a hard exercise. At
+llama.cpp&rsquo;s ~25&nbsp;tok/s per slot that is twelve to nineteen minutes. Every such reply timed out
+client-side <em>after the server had finished generating it</em>, and Aider re-sent the identical prompt with
+exponential backoff: 0.2&nbsp;s, 0.5&nbsp;s &hellip; 4,096&nbsp;s. Seventeen hours in, nine exercises were done, two of
+them had consumed ten hours each, and the server had generated three million tokens that nobody read. Nothing
+errored. The signature is in the usage log, not the harness output: the same <code>prompt_tokens</code> value sixty
+times in a row. The fix is one line (<code>timeout: 7200</code> under <code>extra_params</code>), and the general
+rule is older than this project: <strong>when a slow engine meets a client default, the default wins silently</strong>.</p>
+
+<p><strong>The result.</strong> Swift scored 71.7% on LiveCodeBench against the base model&rsquo;s 63.3%, and it would
+have been easy to report that as a better model. It is not. Of 44 answers across all arms that hit the 32,768-token
+cap, none passed; on the 40 problems where neither model was cut off the score is 37 to 37. The fine-tune changes how
+often the model <em>finishes</em>, not how well it solves. That is still worth having &mdash; an unfinished answer is
+worth nothing &mdash; but it is a different claim, and it predicts something the headline does not: raise the cap far
+enough and the accuracy gap should close while the token gap stays.
+<strong>Any benchmark of a thinking model under an output cap is partly a benchmark of the cap.</strong> Report
+truncations next to every pass rate.</p>
+
 <h2>Provenance</h2>
 <p>Conditions changed across five days as we learned what mattered. Two tables in the log can look directly comparable without being so; this is the key.</p>
 

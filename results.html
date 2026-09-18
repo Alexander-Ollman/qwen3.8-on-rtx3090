@@ -37,6 +37,7 @@
   <div class="stat"><div class="v">959.8<small>tok/s</small></div><div class="l">one GPU at C=64</div></div>
   <div class="stat"><div class="v">204<small>K</small></div><div class="l">deepest context served</div></div>
   <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">Aider polyglot pass_2</div></div>
+  <div class="stat"><div class="v">&minus;50<small>%</small></div><div class="l">thinking tokens with Swift, same accuracy</div></div>
 </div>
 
 <div class="box">
@@ -44,6 +45,119 @@
   not all measured under equal conditions. Where a figure was taken while a second GPU was busy,
   or before the power cap, or with a different prompt corpus, it says so inline. The canonical
   table below supersedes any earlier figure it contradicts.
+</div>
+
+
+<h2 id="swift">Swift against the base model, thinking on <span class="badge">13 SEP</span></h2>
+<p><a href="https://huggingface.co/ukisai/Swift-Qwen3.8-27B">ukisai/Swift-Qwen3.8-27B</a> is a fine-tune of
+Qwen3.8-27B trained to penalise the reasoning-marker tokens its author associates with overthinking. The
+claim, made on bf16 weights over five seeds: <strong>LiveCodeBench v6 76.8% &rarr; 81.6% with 46% fewer median
+thinking tokens, and under one point lost across ten benchmarks</strong>. This section tests that claim on
+this hardware, under the author&rsquo;s own conditions.</p>
+
+<div class="box">
+  <strong>What was held equal.</strong> Both models as <strong>bartowski&rsquo;s Q4_K_M GGUF</strong>: same
+  quantizer, same llama.cpp release (b10896), a byte-identical imatrix calibration file, MTP layers at Q4_0 in
+  both, identical 17.44&nbsp;GB files. So the arms differ in the fine-tuned weights and nothing else. Served
+  one after the other on the same card (GPU&nbsp;1) by the same llama.cpp server: two slots of 40K, q8_0 KV, the
+  model&rsquo;s own MTP head as the speculator. Thinking on at the template default (<code>xhigh</code>),
+  temperature 1.0, top_p 0.95, top_k 20, 32,768-token output cap, one sample per problem. A third arm runs the
+  author&rsquo;s own Q4_K_M (different imatrix, MTP at Q8_0), because that is the file people actually download.
+</div>
+
+<figure class="fig">
+  <figcaption>Median output tokens per answer &#183; thinking on &#183; lower is better</figcaption>
+  <svg class="chart" viewBox="0 0 760 214" role="img" aria-labelledby="sw-t2">
+<title id="sw-t2">Median output tokens per answer, base Qwen3.8-27B against Swift, thinking on</title>
+<line class="grid" x1="276.0" x2="276.0" y1="16" y2="170"/>
+<text class="tick" x="276.0" y="186" text-anchor="middle">0</text>
+<line class="grid" x1="366.9" x2="366.9" y1="16" y2="170"/>
+<text class="tick" x="366.9" y="186" text-anchor="middle">4,000</text>
+<line class="grid" x1="457.8" x2="457.8" y1="16" y2="170"/>
+<text class="tick" x="457.8" y="186" text-anchor="middle">8,000</text>
+<line class="grid" x1="548.6" x2="548.6" y1="16" y2="170"/>
+<text class="tick" x="548.6" y="186" text-anchor="middle">12,000</text>
+<line class="grid" x1="639.5" x2="639.5" y1="16" y2="170"/>
+<text class="tick" x="639.5" y="186" text-anchor="middle">16,000</text>
+<text class="axlbl" x="485" y="208" text-anchor="middle">median output tokens per answer &#183; thinking on &#183; same 4-bit quantization</text>
+<path class="bar b-floor" d="M276,20 L593.4,20 Q598.4,20 598.4,25 L598.4,39 Q598.4,44 593.4,44 L276,44 Z"/>
+<text class="rowlbl" x="264" y="36.0" text-anchor="end">LiveCodeBench v6 · base</text>
+<text class="rowval b-floor" x="606.4" y="36.0">14,190</text>
+<path class="bar b-top" d="M276,55 L430.8,55 Q435.8,55 435.8,60 L435.8,74 Q435.8,79 430.8,79 L276,79 Z"/>
+<text class="rowlbl" x="264" y="71.0" text-anchor="end">LiveCodeBench v6 · Swift</text>
+<text class="rowval b-top" x="443.8" y="71.0">7,035</text>
+<path class="bar b-floor" d="M276,90 L382.8,90 Q387.8,90 387.8,95 L387.8,109 Q387.8,114 382.8,114 L276,114 Z"/>
+<text class="rowlbl" x="264" y="106.0" text-anchor="end">Aider, per request · base</text>
+<text class="rowval b-floor" x="395.8" y="106.0">4,923</text>
+<path class="bar b-top" d="M276,125 L324.1,125 Q329.1,125 329.1,130 L329.1,144 Q329.1,149 324.1,149 L276,149 Z"/>
+<text class="rowlbl" x="264" y="141.0" text-anchor="end">Aider, per request · Swift</text>
+<text class="rowval b-top" x="337.1" y="141.0">2,337</text>
+</svg>
+</figure>
+
+<h3>LiveCodeBench v6 &mdash; 60 fixed problems from the v6 increment (Jan&ndash;Apr 2025)</h3>
+<div class="tw">
+  <table>
+    <thead><tr><th></th><th>Base</th><th>Swift (bartowski)</th><th>Swift (author&rsquo;s quant)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>pass@1</strong></td><td class="n">63.3%</td><td class="n">71.7%</td><td class="n">76.7%</td></tr>
+      <tr><td>&nbsp;&nbsp;easy (15) / medium (18) / hard (27)</td><td class="n">15 / 15 / 8</td><td class="n">15 / 15 / 13</td><td class="n">15 / 15 / 16</td></tr>
+      <tr><td>Output tokens, mean</td><td class="n">16,476</td><td class="n">13,449<span class="sub">&minus;18%</span></td><td class="n">13,535<span class="sub">&minus;18%</span></td></tr>
+      <tr><td>Output tokens, median</td><td class="n">14,190</td><td class="n">7,035<span class="sub">&minus;50%</span></td><td class="n">8,467<span class="sub">&minus;40%</span></td></tr>
+      <tr><td>Swift shorter on the same problem</td><td class="n">&mdash;</td><td class="n">40 of 60</td><td class="n">41 of 60</td></tr>
+      <tr><td>Answers cut off at the 32K cap</td><td class="n">19</td><td class="n">14</td><td class="n">11</td></tr>
+      <tr><td>&nbsp;&nbsp;of which passed</td><td class="n">0</td><td class="n">0</td><td class="n">0</td></tr>
+      <tr><td><strong>Problems neither arm truncated</strong> (40)</td><td class="n">37 solved</td><td class="n">37 solved</td><td class="n">37 solved</td></tr>
+      <tr><td>&nbsp;&nbsp;mean tokens on those</td><td class="n">8,445</td><td class="n">5,337<span class="sub">&minus;37%</span></td><td class="n">5,529<span class="sub">&minus;36%</span></td></tr>
+      <tr><td>Mean latency per problem</td><td class="n">623 s</td><td class="n">511 s</td><td class="n">527 s</td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="section-note">Paired bootstrap on the pass@1 difference: bartowski arm [+0.0, +16.7] points, author&rsquo;s
+quant [+3.3, +23.3]. Discordant pairs: 1 problem only the base solved, 6 (9) only Swift solved &mdash; every one of
+them a problem the base ran out of tokens on.</p>
+
+<h3>Aider polyglot &mdash; the fixed 36-exercise subset, two attempts, diff format</h3>
+<div class="tw">
+  <table>
+    <thead><tr><th></th><th>Base</th><th>Swift (bartowski)</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Solved cold / after test feedback</strong></td><td class="n">25.0% / 69.4%</td><td class="n">30.6% / 66.7%</td></tr>
+      <tr><td>Well-formed edits</td><td class="n">97.2%</td><td class="n">94.4%</td></tr>
+      <tr><td>Output tokens per exercise, mean / median</td><td class="n">18,555 / 17,868</td><td class="n">12,170 / 9,788<span class="sub">&minus;34% / &minus;45%</span></td></tr>
+      <tr><td>Output tokens per request, mean / median</td><td class="n">9,864 / 4,923</td><td class="n">5,634 / 2,337<span class="sub">&minus;43% / &minus;53%</span></td></tr>
+      <tr><td>Reasoning tokens per request, median (est.)</td><td class="n">4,678</td><td class="n">1,994<span class="sub">&minus;57%</span></td></tr>
+      <tr><td>Answer tokens per request, mean (est.)</td><td class="n">510</td><td class="n">487</td></tr>
+      <tr><td>Requests cut off at the cap, returning no answer</td><td class="n">7 of 94</td><td class="n">2 of 93</td></tr>
+      <tr><td>Context windows exhausted</td><td class="n">7</td><td class="n">2</td></tr>
+      <tr><td><strong>Time spent</strong><span class="sub">summed per exercise; two ran at once, so wall clock was about half</span></td><td class="n">9.6 h</td><td class="n">5.5 h<span class="sub">&minus;43%</span></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="section-note">Reasoning and answer tokens are estimated by splitting each request&rsquo;s
+<code>completion_tokens</code> by the character share of <code>reasoning_content</code>, recorded by a logging proxy
+in front of the server. The answers are the same length in both arms; all of the saving is thinking.</p>
+
+<div class="box warn">
+  <strong>What this does and does not confirm.</strong> <em>Confirmed:</em> the thinking reduction. Medians fall
+  40&ndash;57% against a claimed 46&ndash;58%; means fall less (18&ndash;43%) because the hardest problems run to the
+  cap in both models. <em>Not confirmed as stated:</em> the accuracy gain. It is real on the scoreboard and it is an
+  artefact of the output cap: <strong>no truncated answer ever passed, and on untruncated problems the two models
+  score identically</strong>. The author&rsquo;s +4.8 points on LiveCodeBench was measured under the same 32,768 cap and
+  very likely has the same cause. <em>Not resolvable here:</em> &ldquo;under 1% loss&rdquo;. With 60 and 36 problems and
+  one seed, pass rates carry &plusmn;12&ndash;15 points. What we can say is that no loss is visible.
+  <em>Not tested:</em> bf16 weights, vision, the other eight benchmarks, and long-context behaviour of the
+  quants (the author&rsquo;s card warns that quality degrades below Q6_K past 32K, and Q6_K does not fit a 24&nbsp;GB
+  card with usable context).
+</div>
+
+<div class="box">
+  <strong>Why the base run took three attempts.</strong> At thinking <code>xhigh</code> the base model writes 17,000 to
+  28,000 tokens for a single reply on the harder exercises. At llama.cpp&rsquo;s ~25&nbsp;tok/s per slot that is twelve to nineteen minutes, which is
+  longer than Aider&rsquo;s hard-coded 600-second request timeout &mdash; and its benchmark does not stream. The first
+  run re-sent one prompt 60 times with exponential backoff and spent ten hours on two exercises. The full 225
+  exercises would take about three days per arm at that speed, which is why this is a 36-exercise subset. See
+  <a href="lessons.html#swift">Lessons</a>.
 </div>
 
 <h2>The ladder</h2>
