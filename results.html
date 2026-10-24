@@ -35,9 +35,10 @@
   <div class="stat"><div class="v">212.1<small>tok/s</small></div><div class="l">best single-stream</div></div>
   <div class="stat"><div class="v">7.7<small>&#215;</small></div><div class="l">tuning ladder span</div></div>
   <div class="stat"><div class="v">959.8<small>tok/s</small></div><div class="l">one GPU at C=64</div></div>
-  <div class="stat"><div class="v">204<small>K</small></div><div class="l">deepest context served</div></div>
+  <div class="stat"><div class="v">204<small>K</small></div><div class="l">deepest context served, vLLM</div></div>
   <div class="stat"><div class="v">48.7<small>%</small></div><div class="l">Aider polyglot pass_2</div></div>
   <div class="stat"><div class="v">&minus;50<small>%</small></div><div class="l">thinking tokens with Swift, same accuracy</div></div>
+  <div class="stat"><div class="v">262<small>K</small></div><div class="l">full window on one card, llama.cpp, q4_0 KV</div></div>
 </div>
 
 <div class="box">
@@ -45,6 +46,106 @@
   not all measured under equal conditions. Where a figure was taken while a second GPU was busy,
   or before the power cap, or with a different prompt corpus, it says so inline. The canonical
   table below supersedes any earlier figure it contradicts.
+</div>
+
+
+<h2 id="unleashed">Unleashed-27B, and the full 262K window on one card <span class="badge">24 OCT</span></h2>
+<p><a href="https://huggingface.co/outsourc-e/Qwen3.8-27B-Unleashed-GGUF">outsourc-e/Qwen3.8-27B-Unleashed-GGUF</a>
+has a reputation for topping benchmarks. Read from its provenance, it is two existing pieces put together:
+<strong>JonathanColetti/Qwen3.8-27B-Uncensored</strong>, a Heretic abliteration of the base model (refusal behaviour
+removed by editing the weights, not by training), quantized with <strong>Unsloth&rsquo;s Dynamic 3.0</strong>
+per-tensor recipe. There is no training of its own, so any benchmark reputation it has is the base model&rsquo;s. Its
+card&rsquo;s own claim is <strong>MMLU 82.98% for its Q3_K_XL against 85.3% for stock bf16</strong>; we did not run
+MMLU. This section asks the two questions that matter for serving it: what the uncensoring costs, and whether the file
+buys anything on a 24&nbsp;GB card that the stock quants do not.</p>
+
+<div class="box">
+  <strong>What was held equal.</strong> Every arm ran on the official <code>llama.cpp:server-cuda</code> image,
+  release b10902, on one card, with flash attention and the model&rsquo;s own MTP head as the speculator
+  (<code>--spec-type draft-mtp --spec-draft-n-max 1</code>), one slot. Every downloaded GGUF matches its
+  Hugging&nbsp;Face sha256. Short-prompt decode is a 512-token greedy completion with thinking off; prefill and
+  decode at depth use a real arXiv-prose document, not repeated filler.
+</div>
+
+<h3>Fit and speed, one RTX&nbsp;3090</h3>
+<div class="tw">
+  <table>
+    <thead><tr><th>File</th><th>Max context<span class="sub">q8_0 KV</span></th><th>Max context<span class="sub">q4_0 KV</span></th><th>Decode, short prompt<span class="sub">q8_0 / q4_0 KV</span></th><th>At 261K, q4_0 KV<span class="sub">prefill / decode, time to first token</span></th></tr></thead>
+    <tbody>
+      <tr><td><strong>bartowski stock Q4_K_M</strong><span class="sub">17.4&nbsp;GB, MTP at Q4_0</span></td><td class="n">163,840</td><td class="n">262,144<span class="sub">23.3 GiB</span></td><td class="n">52 / 47&nbsp;tok/s</td><td class="n">450 / 18.1&nbsp;tok/s<span class="sub">9.8 min</span></td></tr>
+      <tr class="hl"><td><strong>Unsloth stock UD-Q4_K_M</strong><span class="sub">16.5&nbsp;GB</span></td><td class="n">196,608</td><td class="n">262,144<span class="sub">22.4 GiB</span></td><td class="n">53 / 53&nbsp;tok/s</td><td class="n">459 / 19.0&nbsp;tok/s<span class="sub">9.6 min</span></td></tr>
+      <tr><td><strong>Unleashed UD-Q4_K_M</strong><span class="sub">16.5&nbsp;GB, MTP at Q6_K</span></td><td class="n">196,608</td><td class="n">262,144<span class="sub">22.5 GiB</span></td><td class="n">55 / 50&nbsp;tok/s</td><td class="n">455 / 19.5&nbsp;tok/s<span class="sub">9.7 min</span></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="section-note">Max context is the largest window the server would allocate at load, stepped down from
+262,144; the VRAM figure is at 262,144 with q4_0 KV. The edge the Unsloth and Unleashed files have over
+bartowski&rsquo;s &mdash; another 32K at q8_0 &mdash; comes from the Unsloth recipe&rsquo;s smaller file, not from the
+uncensoring: the stock Unsloth quant has it too.</p>
+
+<h3>What the uncensoring costs: KL divergence against each family&rsquo;s own Q8_0</h3>
+<div class="tw">
+  <table>
+    <thead><tr><th>Quant</th><th>Mean KLD</th><th>Same top token</th><th>Perplexity vs Q8_0</th></tr></thead>
+    <tbody>
+      <tr><td>Unleashed Q5_K_M</td><td class="n">0.038</td><td class="n">96.6%</td><td class="n">+1.1%</td></tr>
+      <tr><td>Unleashed Q4_K_M</td><td class="n">0.071</td><td class="n">94.9%</td><td class="n">+1.2%</td></tr>
+      <tr class="hl"><td>Stock Unsloth UD-Q4_K_M / bartowski Q4_K_M</td><td class="n">0.063 / 0.063</td><td class="n">95.1% / 95.0%</td><td class="n">+2.0% / +0.7%</td></tr>
+      <tr><td>Unleashed IQ4_XS</td><td class="n">0.111</td><td class="n">93.3%</td><td class="n">+4.7%</td></tr>
+      <tr><td>Unleashed Q3_K_XL</td><td class="n">0.154</td><td class="n">91.5%</td><td class="n">+6.4%</td></tr>
+      <tr><td><em>Unleashed Q8_0 vs stock Q8_0</em><span class="sub">the uncensoring alone</span></td><td class="n"><em>0.032</em></td><td class="n"><em>96.1%</em></td><td class="n"><em>+0.8%</em></td></tr>
+    </tbody>
+  </table>
+</div>
+<p class="section-note"><code>llama perplexity --kl-divergence</code> over 40 &times; 2,048 tokens of arXiv prose
+published after the model&rsquo;s training cutoff plus Python standard-library source. Each quant is scored against
+its own family&rsquo;s Q8_0: stock quants against the stock Q8_0, Unleashed quants against an Unleashed Q8_0 that
+was converted here from JonathanColetti&rsquo;s bf16 with the b10902 converter and <code>llama quantize</code>. The Q8_0
+references ran on GPU&nbsp;1 with 15 of 65 layers on the CPU. The last row compares the two Q8_0s directly, so it
+isolates what the abliteration changed.</p>
+
+<h3>LiveCodeBench v6</h3>
+<p>Same 60 problems and conditions as <a href="#swift">the Swift study</a>: thinking on, temperature 1.0, 32,768-token
+output cap, two slots of 40K, q8_0 KV. <strong>Stock Unsloth UD-Q4_K_M: 63.3%</strong> (38 of 60; easy 100%, medium
+77.8%, hard 33.3%; 18 answers cut off at the cap), median 14,766 output tokens &mdash; <strong>the same pass rate as
+bartowski&rsquo;s base Q4_K_M, 63.3%</strong>. The Unleashed Q4_K_M arm has no result yet. Its first run was lost when
+GPU&nbsp;0 fell off the bus partway through (those rows are voided, not merged); <strong>the rerun on GPU&nbsp;1 is still
+running</strong>, and this page will carry its number when it finishes.</p>
+
+<div class="box">
+  <strong>Reading.</strong> Unleashed is the base model with its refusals removed, at a quality cost smaller than
+  4-bit quantization&rsquo;s: the uncensoring alone moves the output distribution about half as far (KLD 0.032) as
+  going from Q8_0 to Q4_K_M does (0.063), and its own Q4_K_M sits about as close to its Q8_0 (0.071) as the stock one
+  does. It has <strong>no speed or fit advantage over the stock Unsloth quant</strong>; it is the same recipe on
+  slightly different weights. The only reason to serve it is refusals. Its smaller files trade quality for room:
+  IQ4_XS and Q3_K_XL diverge 0.111 and 0.154 against 0.071 for its Q4_K_M, which is a large price for keeping q8_0
+  KV at full length &mdash; and the fit of those two at 262K was not load-tested here.
+</div>
+
+<div class="box warn">
+  <strong>This qualifies <a href="#unsloth">&ldquo;Unsloth: resolved, and the answer is no&rdquo;</a> below, without
+  reversing it.</strong> That section is about speed on vLLM, and it stays true: Unsloth&rsquo;s GGUFs run through
+  llama.cpp at about a quarter of the patched stack&rsquo;s speed. The new finding is about length. Through llama.cpp,
+  <strong>a 4-bit GGUF with q4_0 KV is the only configuration found that holds the model&rsquo;s full
+  262,144-token window on one 24&nbsp;GB card</strong> &mdash; all three Q4_K_M files tested do, the Unsloth one at
+  22.4&nbsp;GiB, which is the one we serve. The price is speed at depth &mdash; a
+  261K-token prompt takes 9.6 minutes to read and then decodes at 19&nbsp;tok/s &mdash; and an unknown: <strong>q4_0
+  KV quality at depth has not been measured</strong>. The KLD and LiveCodeBench figures above were taken at short
+  context and q8_0 KV, and the planned q4_0-against-q8_0 fidelity run with the long-context harness has not been done.
+  So <a href="#ctxdecision">fp8 KV at 150K on patched vLLM</a> remains the recommendation for anything up to 150K, where
+  its fidelity is measured; the llama.cpp profile is for prompts that will not otherwise fit.
+</div>
+
+<div class="box">
+  <strong>Next: Qwen3.8-Flash-Next <span class="badge">24 OCT</span></strong> &mdash; not run yet. As published, it
+  is a 177B mixture-of-experts (48 layers, 512 experts with 10 active, full attention every fourth layer, 262K
+  native), architecture <code>qwen4exp</code>, which the b10902 llama.cpp here supports. The file being fetched is
+  ISTA-DASLab&rsquo;s GSQ-RCO IQ3_S, 83.6&nbsp;GB (54.8&nbsp;GB core plus a 28.8&nbsp;GB n-gram table). <em>Their card&rsquo;s
+  claim:</em> LiveCodeBench v6 86.9% against 87.4% at bf16, settings unstated. <em>A third party&rsquo;s claim:</em> one
+  report of a 2&times;&nbsp;3090 rig (x16 + x4, 32&nbsp;GB RAM, 250&nbsp;W) at 137&ndash;145&nbsp;tok/s decode and
+  1,800&nbsp;tok/s prefill on IQ3_S with the Strata engine. Neither is our measurement, and this machine is not that rig: GPU&nbsp;1 here is PCIe Gen3 x4 behind the chipset, the host has 62&nbsp;GB of shared RAM against the ~60&nbsp;GB
+  Strata&rsquo;s normal mode wants for IQ3_S, and the CPU is AVX2-only. It waits on GPU&nbsp;0 being back and a lower
+  power cap for two-card runs.
 </div>
 
 
@@ -1270,6 +1371,13 @@ AutoRound exports, and their NVFP4 build is Blackwell-only and unusable on Amper
 plugin, and states that <em>&ldquo;the only confirmed use case is memory footprint reduction&rdquo;</em>.
 So Unsloth&rsquo;s genuine quality-per-byte advantage stays locked inside llama.cpp, at 27.6&ndash;42.6
 tok/s against the patched stack&rsquo;s 167.8 &mdash; roughly <strong>4&times; the speed</strong> to buy it.</p>
+
+<div class="box">
+  <strong>Update, 24 October.</strong> Everything above still holds for speed. It does not hold for length:
+  through llama.cpp, a 4-bit GGUF with q4_0 KV (Unsloth&rsquo;s UD-Q4_K_M among them) turned out to be the only
+  configuration found that holds the full 262,144-token window on one card. See <a href="#unleashed">Unleashed-27B, and the full 262K
+  window on one card</a> for the numbers and for why fp8 KV at 150K stays the recommendation up to 150K.
+</div>
 
 <div class="box">
   <strong>Minor correction.</strong> This study previously listed UD-Q4_K_XL at 17.92&nbsp;GB. The

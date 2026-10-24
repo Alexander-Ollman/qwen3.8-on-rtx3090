@@ -275,12 +275,15 @@ harness.framework             1.0.0
   <strong>If a genuinely comparable number is ever wanted</strong>, the recipe is: the unquantized checkpoint, the reference harness at its exact commit, that harness's own default sampling parameters, speculation off, and the result reported separately as a reproduction attempt rather than mixed into this table. We did not do this, because the question here was how <em>this deployment</em> behaves &mdash; which is the question that determines what to actually run.
 </div>
 
-<h2 id="xid">The card died twice, and the second one broke our explanation</h2>
+<h2 id="xid">The card died three times, and none of them settles why</h2>
 
-<p>GPU&nbsp;0 fell off the PCIe bus twice, seven days apart, with an identical signature both times:</p>
+<p>GPU&nbsp;0 fell off the PCIe bus three times &mdash; twice in August, seven days apart, and again on 24 October &mdash;
+with an identical signature every time:</p>
 
 <pre><code>Aug 22 16:24:03  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
 Aug 29 21:49:55  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
+                 NVRM: Xid 154, GPU recovery action ... 0x1 (GPU Reset Required)
+Oct 24 00:17:43  NVRM: Xid (PCI:0000:01:00): 79, GPU has fallen off the bus.
                  NVRM: Xid 154, GPU recovery action ... 0x1 (GPU Reset Required)</code></pre>
 
 <div class="box stop">
@@ -301,6 +304,25 @@ bad in that respect &mdash; synchronised allreduce barriers make both cards peak
 <em>simultaneously and repeatedly</em>, where every other workload in this study has one card working
 while the other idles. So the cap being in place rules out sustained over-draw; it does not exonerate
 power.</p>
+
+<div class="box warn">
+  <strong>The third fault (24 October) was not tensor parallel.</strong> By then the machine had a new
+  <strong>1500&nbsp;W</strong> power supply. The two cards were running <em>independent</em> single-card
+  llama.cpp jobs, one each, with no cross-card traffic at all: GPU&nbsp;0 had run a LiveCodeBench arm alone
+  from about 23:35 the evening before without trouble; GPU&nbsp;1 started a second arm at 00:02; GPU&nbsp;0 dropped at 00:17:43,
+  <strong>about fifteen minutes after both cards were at full load</strong>. It was GPU&nbsp;0 again, and GPU&nbsp;1
+  then ran alone for five hours without incident. Nothing recorded GPU power at the time, so there is no trace of
+  what either card drew in the seconds before. A 4&nbsp;Hz power, thermal and PCIe logger runs now; over those five
+  hours it shows GPU&nbsp;1 pinned at its 250&nbsp;W cap at 67&nbsp;&deg;C.
+</div>
+
+<p>What the third fault changes, stated narrowly. Total supply capacity is no longer a plausible explanation, and
+tensor parallelism is not a necessary condition: two cards each loaded on their own was enough. What it leaves
+open is most of the list &mdash; GPU&nbsp;0&rsquo;s own power cabling or adapter, its slot or riser, the card itself,
+or heat with both cards loaded &mdash; and <strong>we cannot choose between those from what was logged</strong>. Two
+practical changes follow. Until it is explained, avoid sustained full load on both cards at once. And capture
+<code>sudo nvidia-bug-report.sh</code> <em>before</em> power-cycling after the next one, because the driver&rsquo;s crash
+state lives in the loaded driver and a power-cycle discards it.</p>
 
 <h3>The topology is the more useful finding</h3>
 

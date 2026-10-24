@@ -34,7 +34,7 @@
 <h2>Before anything else: cap the power</h2>
 
 <div class="box stop">
-  <strong>This is not optional.</strong> An uncapped card here hit <code>Xid 79</code> mid-benchmark — "GPU has fallen off the bus". Unrecoverable; the machine needed a reboot. It was a 12&nbsp;V rail brownout from transient spikes under a Triton autotuner, not a driver bug. We proved that by deliberately re-running the exact workload that triggered it after capping: no recurrence across eight server starts.
+  <strong>This is not optional.</strong> An uncapped card here hit <code>Xid 79</code> mid-benchmark — "GPU has fallen off the bus". Unrecoverable; the machine needed a reboot. We first put that down to a 12&nbsp;V rail brownout from transient spikes under a Triton autotuner, because re-running the trigger after capping did not recur across eight server starts. The same card has since fallen off the bus twice more with the cap on, the last time on a 1500&nbsp;W PSU, so the cause is open (<a href="lessons.html#xid">Lessons</a>). Cap anyway: it is cheap, and it is the condition every number on this site was measured under.
 </div>
 
 <pre><code>sudo nvidia-smi -pl 250     # per-GPU power limit, watts
@@ -244,6 +244,54 @@ server {
 <p>Set client timeouts generously on the Swift side. A 32K-token answer at 25&ndash;55&nbsp;tok/s is ten to twenty
 minutes, and most OpenAI clients give up at ten.</p>
 
+<h2 id="long-gguf">The full 262K window on one card: llama.cpp with q4_0 KV</h2>
+
+<p>The only configuration found that holds the model&rsquo;s whole 262,144-token window on a single 24&nbsp;GB card is
+a 4-bit GGUF through llama.cpp with a q4_0 KV cache; the profile serves
+<a href="results.html#unleashed">Unsloth&rsquo;s UD-Q4_K_M</a> that way: one slot, 22.4&nbsp;GiB. It is a profile for the one document that will not otherwise fit, not a default. A 261K-token prompt
+is read at about 460&nbsp;tok/s, which is <strong>9.6 minutes before the first token</strong>, and decode at that
+depth is 19&nbsp;tok/s (about 53 on a short prompt). And q4_0 KV quality at depth has not been measured; for anything up
+to 150K, <a href="results.html#ctxdecision">patched vLLM with fp8 KV</a> is the measured answer.</p>
+
+<pre><code>hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-Q4_K_M.gguf --local-dir models/gguf/unsloth
+
+docker run -d --name long --gpus '"device=1"' --ipc=host -p 18021:18021 \
+  -v $PWD/models/gguf:/models:ro ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/unsloth/Qwen3.8-27B-UD-Q4_K_M.gguf --alias qwen3.8-27b \
+  --host 0.0.0.0 --port 18021 --api-key $KEY \
+  -ngl 99 -fa on -ctk q4_0 -ctv q4_0 \
+  -c 262144 -np 1 \
+  --spec-type draft-mtp --spec-draft-n-max 1 \
+  --reasoning-format deepseek --jinja --metrics</code></pre>
+
+<p>Slots share <code>-c</code>, so <code>-np 1</code> is what gives one request the whole window.</p>
+
+<p>On this box the same thing is the <code>long-gguf</code> profile. Its launcher,
+<code>deploy/launchers/long-gguf.sh</code>, checks the power cap, removes the vLLM replica on GPU&nbsp;1, and
+recreates the compose <code>swift-gguf</code> service (same llama.cpp image, GPU&nbsp;1, port 18021) with one slot of
+262,144 tokens. That service now takes a <code>GGUF_KV</code> variable, which sets both the K and V cache types and
+defaults to <code>q8_0</code>, so the Swift setup above is unchanged:</p>
+
+<pre><code>deploy/launchers/long-gguf.sh
+#   = GGUF_FILE=unsloth/Qwen3.8-27B-UD-Q4_K_M.gguf GGUF_SERVED_NAME=qwen3.8-27b \
+#     GGUF_NP=1 GGUF_CTX=262144 GGUF_KV=q4_0 \
+#     docker compose --profile gguf up -d --no-deps --force-recreate swift-gguf
+
+GGUF_CTX=196608 GGUF_KV=q8_0 deploy/launchers/long-gguf.sh   # 196K at q8_0 KV instead
+deploy/launchers/unleashed-gguf.sh                           # same serving, Unleashed weights</code></pre>
+
+<p><code>unleashed-gguf.sh</code> serves <code>outsourc-e/Qwen3.8-27B-Unleashed-UD-Q4_K_M.gguf</code> as
+<code>unleashed-qwen3.8-27b</code> and is otherwise identical: only the weights and the model id differ. It is a
+hidden profile in the control panel, to be picked only when the base model&rsquo;s refusals get in the way: the
+measurements give no reason to prefer it on speed, fit or quality.</p>
+
+<div class="box warn">
+  <strong>If you run a control panel that bind-mounts its profile file.</strong> Ours mounts
+  <code>profiles.yaml</code> as a single file. An editor that saves by replacing the file leaves the container
+  reading the old inode, so a new profile silently does not appear. Restart the panel container after editing, and
+  mind any auto-restore setting that relaunches the previous profile on start.
+</div>
+
 <h2>What fits in 24 GB</h2>
 
 <div class="tw">
@@ -255,6 +303,7 @@ minutes, and most OpenAI clients give up at ten.</p>
     <tr class="hl"><td>Patched vLLM, <code>CTX=fast</code></td><td class="n">~17.5 GB</td><td class="n">22.4–22.7 GB</td><td class="n"><strong>~90K</strong> <span class="sub">65,536 is only the default</span></td></tr>
     <tr><td>Patched vLLM, <code>CTX=long</code> (fp8 KV)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~150K</td></tr>
     <tr><td>Patched vLLM, <code>CTX=huge</code> (KVarN)</td><td class="n">~17.5 GB</td><td class="n">~23 GB</td><td class="n">~192K measured</td></tr>
+    <tr><td>llama.cpp, Unsloth UD-Q4_K_M, <strong>q4_0 KV</strong>, one slot</td><td class="n">16.5 GB</td><td class="n">22.4 GiB</td><td class="n">262,144<span class="sub">quality at depth unmeasured</span></td></tr>
     <tr><td>Patched vLLM, <strong>TP=2</strong> (both cards)</td><td class="n">~8.75 GB<span class="sub">per card</span></td><td class="n">22.6 GB<span class="sub">each</span></td><td class="n">204K verified<span class="sub">not recommended here</span></td></tr>
   </tbody>
 </table>

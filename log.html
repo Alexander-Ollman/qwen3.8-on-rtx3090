@@ -2609,13 +2609,61 @@ body, so <code>requestText</code> was empty, every request went to the base card
 from vLLM. Fixed with a <code>js_content</code> handler and <code>internalRedirect</code>.</p>
 
 
+<h2 id="unleashed">30. Unleashed-27B, and the Full Window on One Card <span class="badge">23&ndash;24 OCT</span></h2>
+
+<p><code>outsourc-e/Qwen3.8-27B-Unleashed-GGUF</code> was going round with a reputation for topping benchmarks. Its
+provenance says what it is: JonathanColetti&rsquo;s <code>Qwen3.8-27B-Uncensored</code>, a Heretic abliteration of the
+base model, quantized with Unsloth&rsquo;s Dynamic 3.0 per-tensor map. No training of its own. So the questions were
+narrower than the reputation: what does the uncensoring cost against the stock weights, and does the file buy
+anything on one card? Its card claims MMLU 82.98% for Q3_K_XL against 85.3% for stock bf16; not run here.</p>
+
+<p>Arms: bartowski&rsquo;s stock Q4_K_M (the base file from &sect;29), Unsloth&rsquo;s stock UD-Q4_K_M, and the
+Unleashed UD-Q4_K_M, plus Unleashed Q5_K_M, IQ4_XS and Q3_K_XL for the divergence table. Every GGUF was checked
+against its Hugging&nbsp;Face sha256. All served by the official llama.cpp CUDA image, b10902, one card, flash
+attention, MTP draft. Each file got a load ladder (the largest window that allocates, at q8_0 and q4_0 KV), then
+short-prompt decode and prefill/decode at depth on a real arXiv-prose document. Every Q4_K_M loads the full 262,144
+at q4_0 KV; at q8_0 the Unsloth-recipe files reach 196,608 and bartowski&rsquo;s 163,840.</p>
+
+<p>LiveCodeBench ran as two arms in parallel, one per card, under &sect;29&rsquo;s conditions: Unleashed on GPU&nbsp;0
+from about 23:35, stock Unsloth on GPU&nbsp;1 from 00:02. At <strong>00:17:43 GPU&nbsp;0 fell off the bus</strong>
+(Xid 79, the third time; see <a href="lessons.html#xid">Lessons</a>). The Unleashed arm&rsquo;s partial results were
+moved aside as void rather than resumed into. GPU&nbsp;1 carried on alone for five hours without incident and
+finished the stock arm: <strong>63.3%</strong>, 38 of 60, 18 capped &mdash; the same pass rate as bartowski&rsquo;s
+base in &sect;29. An Unleashed Q8_0 was converted here from JonathanColetti&rsquo;s bf16 with the b10902 converter
+so the Unleashed quants could be scored against their own reference; the KL-divergence runs then went through on
+GPU&nbsp;1, the Q8_0 references with 15 of 65 layers on the CPU. The Unleashed LiveCodeBench rerun is on
+GPU&nbsp;1 and still running at the time of writing.</p>
+
+<div class="box">
+  <strong>Decision: serve the stock Unsloth UD-Q4_K_M with q4_0 KV when the whole 262K window is needed on one
+  card; keep fp8 KV at 150K on patched vLLM for everything up to 150K.</strong> The llama.cpp profile is the only
+  one-card route to the full window found so far (22.4&nbsp;GiB, 9.6&nbsp;min to read 261K, 19&nbsp;tok/s at that
+  depth), but q4_0 KV quality at depth is unmeasured. Unleashed is the base model with refusals removed: KLD 0.032
+  between the two Q8_0s, against 0.063 for 4-bit quantization; no speed or fit advantage. It is served only as a
+  hidden profile. Numbers: <a href="results.html#unleashed">Results</a>.
+</div>
+
+<p class="section-note"><strong>Serving changes.</strong> New control-panel profiles <code>long-gguf</code> (stock
+Unsloth UD-Q4_K_M, 262K, q4_0 KV, GPU&nbsp;1, as <code>qwen3.8-27b</code>) and <code>unleashed-gguf</code> (hidden, as
+<code>unleashed-qwen3.8-27b</code>), with launchers <code>deploy/launchers/long-gguf.sh</code> and
+<code>unleashed-gguf.sh</code>. The compose <code>swift-gguf</code> service gained <code>GGUF_KV</code> (default
+<code>q8_0</code>). The panel bind-mounts its profile file as a single file, so an editor that replaces the file leaves
+the container on the old inode; restart it to pick up the change. <a href="setup.html#long-gguf">Setup</a>.</p>
+
+<p class="section-note"><strong>Still open.</strong> The q4_0-against-q8_0 KV fidelity run at depth with the
+long-context harness of &sect;27&ndash;28; the Unleashed LiveCodeBench number; and Qwen3.8-Flash-Next, whose
+ISTA-DASLab IQ3_S (83.6&nbsp;GB) is downloading. Flash-Next is planned across both cards and waits on GPU&nbsp;0 and a lower power
+cap for two-card runs. The model card&rsquo;s and a third party&rsquo;s figures for it are quoted, labelled, in
+<a href="results.html#unleashed">Results</a>; none are ours yet.</p>
+
+
 <div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
     <p><sup class="fn">2</sup> Range spans baseline vLLM INT4 (~114, syv-ai) to llama.cpp Q4+MTP n=3 (~134&ndash;151, kgptalkie).</p>
     <p><sup class="fn">3</sup> SGLang SMG cache-aware routing claims +92% throughput vs round-robin on prefix-heavy workloads; actual 3090 numbers are untested. Unique-prompt throughput should match vLLM within ~2&ndash;4%.</p>
     <p><sup class="fn">3.6</sup> Measured on Qwen3.6-27B. Same hybrid architecture (GDN+softmax), same parameter count. Directly comparable for throughput; Qwen3.8 is a training improvement, not an architecture change.</p>
     <p style="margin-top: 1rem;"><strong>Key sources:</strong> syv-ai/qwen38-27b-rtx3090, tfriedel/qwen3.6-rtx3090-lab, dbirks &amp; Pilcothink HF repos, lued/Qwen3.8-27B-INT8-W8A16-MTP, kingy.ai GGUF benchmarks, kgptalkie llama.cpp guide, AtomicChat/Unsloth GGUF repos, RadixArk/Qwen3.8-27B-DSpark, SGLang GitHub (sgl-project/sglang, PR #23331), Qwen official blog.</p>
-    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization), section 25 on 31 August (context raised to 85,000; sub-4-bit closed) and sections 26&ndash;28 on 1&ndash;3 September (group-size fix and ExLlamaV3, the fidelity harness, and the long-context fidelity results). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;28 are this host, at a 250 W power cap.</p>
+    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization), section 25 on 31 August (context raised to 85,000; sub-4-bit closed) and sections 26&ndash;28 on 1&ndash;3 September (group-size fix and ExLlamaV3, the fidelity harness, and the long-context fidelity results), section 29 in September (Swift against the base model) and section 30 on 24 October (Unleashed-27B and the full window on one card). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;30 are this host, at a 250 W power cap.</p>
   </div>
 
 

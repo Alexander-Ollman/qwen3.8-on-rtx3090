@@ -24,12 +24,33 @@
 <main class="wrap">
 
 <header class="hero">
-  <p class="kicker">Field notes · 2× RTX 3090 · August&ndash;September 2026</p>
+  <p class="kicker">Field notes · 2× RTX 3090 · August&ndash;October 2026</p>
   <h1>The AI Frontier: No Datacenter Required</h1>
   <p class="subtitle">Running Qwen3.8-27B optimally on an RTX 3090</p>
   <p class="standfirst">212 tokens a second on a graphics card you can buy secondhand, and a fine-tune that halves how long it thinks without costing it an answer. Here is what that gets you, what it cost to get there, and whether it is worth your weekend.</p>
 </header>
 
+
+<section id="long" class="section">
+<p class="kicker">Update &#183; 24 October 2026</p>
+<h2 style="margin-top:.2rem">The whole 262K window on one card, and an &ldquo;uncensored&rdquo; build that is the same model</h2>
+
+<p class="lede">Through llama.cpp, <strong>Unsloth&rsquo;s UD-Q4_K_M with a q4_0 KV cache holds the model&rsquo;s full
+262,144-token window on a single 3090</strong>, at 22.4&nbsp;GiB. It is slow at that depth &mdash; a 261K-token prompt
+takes 9.6 minutes to read, then decodes at 19&nbsp;tok/s &mdash; and q4_0 KV quality at depth is not measured yet, so
+<strong>fp8 KV at 150K on patched vLLM stays the recommendation for anything that fits in 150K</strong>. And
+<a href="https://huggingface.co/outsourc-e/Qwen3.8-27B-Unleashed-GGUF">Unleashed-27B</a>, for all its benchmark
+reputation, is the base model with refusals
+removed and Unsloth&rsquo;s quantization applied: the uncensoring costs less than 4-bit quantization does, it buys no
+speed or room, and the only reason to run it is refusals.</p>
+
+<div class="box">
+  <strong>What was measured.</strong> One card, llama.cpp b10902, MTP speculation. Stock Unsloth UD-Q4_K_M:
+  LiveCodeBench v6 63.3%, the same as the base model&rsquo;s earlier run; KL divergence 0.063 against its Q8_0.
+  Unleashed Q4_K_M: KL divergence 0.071 against its own Q8_0, and 0.032 between the two Q8_0s &mdash; the uncensoring
+  alone. Its LiveCodeBench rerun is still running. <a href="results.html#unleashed">Full method and numbers&nbsp;&rarr;</a>
+</div>
+</section>
 
 <section id="best" class="section">
 <p class="kicker">Update &#183; 18 September 2026</p>
@@ -118,7 +139,7 @@
     <tbody>
       <tr><td><strong>Speed, one person typing</strong></td><td class="n">212 tok/s<span class="sub">measured with one replica running</span></td><td class="n">212 tok/s<span class="sub">but ~11% less once both are resident</span></td></tr>
       <tr><td><strong>Speed, whole team hammering it</strong></td><td class="n">960 tok/s<span class="sub">at 64 concurrent</span></td><td class="n">905 tok/s<span class="sub">at 16 concurrent, low latency</span></td></tr>
-      <tr><td><strong>How much it can read at once</strong></td><td class="n">85K tokens<span class="sub">now the default; 150K with fp8 KV</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
+      <tr><td><strong>How much it can read at once</strong></td><td class="n">85K tokens<span class="sub">now the default; 150K with fp8 KV; 262K through llama.cpp, slowly</span></td><td class="n">262K<span class="sub">split across both, at ⅔ speed</span></td></tr>
       <tr><td><strong>Real coding tasks solved</strong></td><td class="n">48.7%<span class="sub">Aider polyglot, 225 exercises</span></td><td class="n">same</td></tr>
       <tr><td><strong>Power drawn</strong></td><td class="n">250 W</td><td class="n">500 W</td></tr>
     </tbody>

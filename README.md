@@ -4,6 +4,22 @@
 
 **Read it:** https://alexander-ollman.github.io/qwen3.8-on-rtx3090/
 
+## October update: the full 262K window on one card, and Unleashed-27B
+
+Through llama.cpp (b10902, one RTX 3090, MTP draft, one slot), **Unsloth's UD-Q4_K_M with q4_0 KV holds the model's full 262,144-token window at 22.4 GiB**. It is slow at depth, and q4_0 KV quality at depth is not measured yet, so **fp8 KV at 150K on patched vLLM stays the recommendation up to 150K**.
+
+[Unleashed-27B](https://huggingface.co/outsourc-e/Qwen3.8-27B-Unleashed-GGUF) is JonathanColetti's abliterated (uncensored) base model in Unsloth's quant recipe, with no training of its own:
+
+| One card, llama.cpp | Stock Unsloth UD-Q4_K_M | Unleashed UD-Q4_K_M |
+|---|---|---|
+| Max context, q8_0 / q4_0 KV | 196,608 / 262,144 | 196,608 / 262,144 |
+| Decode, short prompt (q8_0 / q4_0 KV) | 53 / 53 tok/s | 55 / 50 tok/s |
+| At 261K (q4_0): prefill / decode / first token | 459 / 19.0 tok/s / 9.6 min | 455 / 19.5 tok/s / 9.7 min |
+| Mean KL divergence vs own family's Q8_0 | 0.063 | 0.071 |
+| LiveCodeBench v6 (60 problems, thinking on) | 63.3% (= bartowski base) | rerun still running |
+
+The uncensoring alone (Unleashed Q8_0 vs stock Q8_0) is KLD **0.032**, about half what 4-bit quantization costs. No speed or fit advantage; the only reason to serve it is refusals.
+
 ## September update: the best way to use it with thinking on
 
 [Swift-Qwen3.8-27B](https://huggingface.co/ukisai/Swift-Qwen3.8-27B) is a fine-tune that claims ~50% fewer thinking tokens for under a point of accuracy. Tested against the base model with quantization held identical (bartowski Q4_K_M of both, llama.cpp, thinking on, 32K cap):
@@ -54,7 +70,7 @@ Correctness (Aider polyglot, 225 exercises): **12.5%** solved cold, **48.7%** af
 ## Before anything else
 
 ```bash
-sudo nvidia-smi -pl 250   # 12V brownout took a card off the PCIe bus (Xid 79)
+sudo nvidia-smi -pl 250   # every figure here is at 250 W; GPU 0 has hit Xid 79 three times, cause open
 sudo nvidia-smi -pm 1
 ```
 
