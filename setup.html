@@ -14,7 +14,7 @@
   <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
   <div class="tabs">
     <a href="index.html">Story</a>
-    <a href="results.html">Results</a>
+    <a href="local-frontier.html">Results</a>
     <a href="lessons.html">Lessons</a>
     <a href="setup.html" aria-current="page">Setup</a>
     <a href="pi.html">Running on Pi</a>
@@ -197,7 +197,7 @@ docker compose --profile single up -d     # one or a few users
 <h2 id="swift">Thinking on? Serve Swift beside it</h2>
 
 <p>With thinking enabled the base model spends most of its output reasoning, and
-<a href="results.html#swift">Swift-Qwen3.8-27B reaches the same answers on about half of it</a>. There is no 4-bit
+<a href="local-frontier.html#swift">Swift-Qwen3.8-27B reaches the same answers on about half of it</a>. There is no 4-bit
 vLLM checkpoint of Swift yet, so it runs as a GGUF through llama.cpp. Q4_K_M is the size that leaves a 24&nbsp;GB card
 room for two 40K slots; Q6_K (22.8&nbsp;GB) does not fit with usable context.</p>
 
@@ -248,10 +248,11 @@ minutes, and most OpenAI clients give up at ten.</p>
 
 <p>The only configuration found that holds the model&rsquo;s whole 262,144-token window on a single 24&nbsp;GB card is
 a 4-bit GGUF through llama.cpp with a q4_0 KV cache; the profile serves
-<a href="results.html#unleashed">Unsloth&rsquo;s UD-Q4_K_M</a> that way: one slot, 22.4&nbsp;GiB. It is a profile for the one document that will not otherwise fit, not a default. A 261K-token prompt
+<a href="local-frontier.html#unleashed">Unsloth&rsquo;s UD-Q4_K_M</a> that way: one slot, 22.4&nbsp;GiB. It is a profile for the one document that will not otherwise fit, not a default. A 261K-token prompt
 is read at about 460&nbsp;tok/s, which is <strong>9.6 minutes before the first token</strong>, and decode at that
-depth is 19&nbsp;tok/s (about 53 on a short prompt). And q4_0 KV quality at depth has not been measured; for anything up
-to 150K, <a href="results.html#ctxdecision">patched vLLM with fp8 KV</a> is the measured answer.</p>
+depth is 19&nbsp;tok/s (about 53 on a short prompt). A recall test found no loss from q4_0 KV at depths up to 258K
+(<a href="local-frontier.html#unleashed">details</a>), but finer fidelity is unmeasured; for anything up
+to 150K, <a href="local-frontier.html#ctxdecision">patched vLLM with fp8 KV</a> is the measured answer.</p>
 
 <pre><code>hf download unsloth/Qwen3.8-27B-GGUF Qwen3.8-27B-UD-Q4_K_M.gguf --local-dir models/gguf/unsloth
 
@@ -291,6 +292,34 @@ measurements give no reason to prefer it on speed, fit or quality.</p>
   reading the old inode, so a new profile silently does not appear. Restart the panel container after editing, and
   mind any auto-restore setting that relaunches the previous profile on start.
 </div>
+
+<h2 id="flash-strata">Both cards, one 177B model: Flash-Next on Strata</h2>
+
+<p>Qwen3.8-Flash-Next (177B MoE) is the strongest model measured here
+(<a href="local-frontier.html#flash">numbers</a>), and the Strata engine is the way to serve it on two 3090s:
+about 130&nbsp;tok/s on a short prompt, against 47 for llama.cpp on the same two cards. Run only its published
+Docker image, against a GGUF you downloaded yourself, bound to localhost:</p>
+
+<pre><code>hf download ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --include "IQ3_S/*" --local-dir models/gguf/ista-flash-next
+
+docker run -d --name flash --gpus all -p 127.0.0.1:18040:8080 \
+  --ulimit memlock=-1:-1 --shm-size 2g --stop-timeout 120 \
+  -v $PWD/strata-data:/data -v $PWD/models/gguf/ista-flash-next/IQ3_S:/models:ro \
+  -e MODEL_PATH=/models -e FAMILY=qwen -e MODEL=IQ3_S -e VISION=off -e KV=int8 \
+  -e CONTEXT=256k -e GPUS=0,1 -e API_KEY=$KEY \
+  ghcr.io/niko1221/strata:0.2.3-cuda13</code></pre>
+
+<p>The first start writes a prepared pack (7.9&nbsp;GB here) and downloads a 5.2&nbsp;GB MTP draft layer into
+<code>/data</code>, about 8 minutes on this connection. Later starts take under a minute. Leave the container
+without a memory limit: the experts that do not fit on the cards stay pinned in host RAM, about 48&nbsp;GB of it here.
+Check <code>free -g</code> before you start it on a shared machine. <code>--stop-timeout 120</code> matters: Docker&rsquo;s
+default 10 seconds can kill it mid-unload.</p>
+
+<p>On this box it is the <code>flash-strata</code> profile in qwen-control, launched by
+<code>deploy/launchers/flash-strata.sh</code>, served as <code>qwen3.8-flash-next-iq3_s</code> on :18040.
+Through llama.cpp instead, use <code>--fit</code> placement rather than <code>-ncmoe</code> on two cards.
+<code>-ncmoe N</code> moves the experts of the <em>first</em> N layers to RAM, and with a layer split those are all
+on GPU&nbsp;0, so GPU&nbsp;1 runs out of memory.</p>
 
 <h2>What fits in 24 GB</h2>
 
@@ -380,7 +409,7 @@ measurements give no reason to prefer it on speed, fit or quality.</p>
 </div>
 
 <div class="foot">
-  <p><strong>What is verified and what is not.</strong> Every command on this page was run on the machine described in the <a href="results.html">results</a>, except where noted: the llama.cpp build commands are reconstructed from a working install rather than replayed from scratch, and the local group-size patch to the syv-ai prep scripts unblocks <em>loading</em> only — whether the resulting checkpoint is numerically sound was never tested against a live serve.</p>
+  <p><strong>What is verified and what is not.</strong> Every command on this page was run on the machine described in the <a href="local-frontier.html">results</a>, except where noted: the llama.cpp build commands are reconstructed from a working install rather than replayed from scratch, and the local group-size patch to the syv-ai prep scripts unblocks <em>loading</em> only — whether the resulting checkpoint is numerically sound was never tested against a live serve.</p>
   <p>Numbers here are one model, one machine, at 4-bit, with reasoning disabled. They are honest measurements of this deployment, not claims about the model's capability, and they are not comparable to published leaderboard figures. See <a href="lessons.html">Lessons</a> for what has to be held constant before two numbers can be compared at all.</p>
 </div>
 

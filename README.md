@@ -4,9 +4,21 @@
 
 **Read it:** https://alexander-ollman.github.io/qwen3.8-on-rtx3090/
 
+## Late October: a 177B MoE on both cards (Qwen3.8-Flash-Next)
+
+ISTA-DASLab's GSQ-RCO IQ3_S of the 177B Qwen3.8-Flash-Next (routed experts at ~3.3 bits/weight) runs on both 3090s:
+
+| Flash-Next IQ3_S | Decode, short prompt | Decode deep | Prompt reading |
+|---|---|---|---|
+| llama.cpp b11854, one card | 25 tok/s | 23 at 32K | ~78 tok/s |
+| llama.cpp b11854, two cards (`--fit`) | 47 tok/s | 36 at 32K | ~520 tok/s |
+| **Strata 0.2.3, two cards** (int8 KV, its MTP draft) | **116–138 tok/s** | **96 at 239K** | **~1,250 tok/s cold** (239K in 3.2 min) |
+
+LiveCodeBench v6, same harness and 32K cap as the 27B arms: **80.8% over 120 problems** (83.3% / 78.3%) against 61.7–62.5% for the base and Unleashed 27B. **The whole lead is on problems the 27B ran out of room for**: on problems neither model truncated, the scores are identical (38/38, 36/36, 37/37). Against Swift-27B (76.7% on set 1) it is 6.6 points, inside noise. It takes both cards and ~48 GB of host RAM. Full numbers: [local-frontier.html#flash](https://alexander-ollman.github.io/qwen3.8-on-rtx3090/local-frontier.html#flash).
+
 ## October update: the full 262K window on one card, and Unleashed-27B
 
-Through llama.cpp (b10902, one RTX 3090, MTP draft, one slot), **Unsloth's UD-Q4_K_M with q4_0 KV holds the model's full 262,144-token window at 22.4 GiB**. It is slow at depth, and q4_0 KV quality at depth is not measured yet, so **fp8 KV at 150K on patched vLLM stays the recommendation up to 150K**.
+Through llama.cpp (b10902, one RTX 3090, MTP draft, one slot), **Unsloth's UD-Q4_K_M with q4_0 KV holds the model's full 262,144-token window at 22.4 GiB**. It is slow at depth. A recall test found no loss from q4_0 KV up to 258K, but finer fidelity is unmeasured, so **fp8 KV at 150K on patched vLLM stays the recommendation up to 150K**.
 
 [Unleashed-27B](https://huggingface.co/outsourc-e/Qwen3.8-27B-Unleashed-GGUF) is JonathanColetti's abliterated (uncensored) base model in Unsloth's quant recipe, with no training of its own:
 
@@ -16,7 +28,8 @@ Through llama.cpp (b10902, one RTX 3090, MTP draft, one slot), **Unsloth's UD-Q4
 | Decode, short prompt (q8_0 / q4_0 KV) | 53 / 53 tok/s | 55 / 50 tok/s |
 | At 261K (q4_0): prefill / decode / first token | 459 / 19.0 tok/s / 9.6 min | 455 / 19.5 tok/s / 9.7 min |
 | Mean KL divergence vs own family's Q8_0 | 0.063 | 0.071 |
-| LiveCodeBench v6 (60 problems, thinking on) | 63.3% (= bartowski base) | rerun still running |
+| LiveCodeBench v6 (60 problems, thinking on) | 63.3% (= bartowski base) | 63.3% |
+| LiveCodeBench v6, both sets (120) | 61.7% | 62.5% |
 
 The uncensoring alone (Unleashed Q8_0 vs stock Q8_0) is KLD **0.032**, about half what 4-bit quantization costs. No speed or fit advantage; the only reason to serve it is refusals.
 
@@ -54,7 +67,7 @@ Correctness (Aider polyglot, 225 exercises): **12.5%** solved cold, **48.7%** af
 | Path | Purpose |
 |---|---|
 | `index.html` | The story — how it started, how it ended, what went wrong |
-| `results.html` | Every number and graph, with provenance on each |
+| `local-frontier.html` | Every number and graph, with provenance on each |
 | `method.html` | How it was measured; the six silent failure modes; the fairness contract |
 | `setup.html` | Configs and commands to reproduce it |
 | `log.html` | The unedited 20-section measurement log, corrections included |

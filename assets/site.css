@@ -195,3 +195,14 @@ tr.failed td{color:var(--ink-3)}
   fill:var(--ink-2);font-variant-numeric:tabular-nums}
 .chart .bar{stroke:none}
 .chart .endlbl .nm{fill:var(--ink-2)}
+/* ---- in-page model tabs (local-frontier.html) ---- */
+.ptabs{display:flex;gap:.5rem;margin:0 0 2rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ptabs a{font-family:'IBM Plex Mono',monospace;font-size:.92rem;font-weight:600;color:var(--ink-2);
+  text-decoration:none;padding:.65rem 1rem .6rem;border:1px solid transparent;border-bottom:none;
+  border-radius:6px 6px 0 0;margin-bottom:-1px;line-height:1.3}
+.ptabs a span{display:block;font-size:.68rem;font-weight:500;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em}
+.ptabs a:hover{color:var(--ink)}
+.ptabs a[aria-selected="true"]{color:var(--go);background:var(--card);border-color:var(--line)}
+.ptabs a:focus-visible{outline:2px solid var(--go);outline-offset:-2px}
+.ptab-panel[hidden]{display:none}
+@media (max-width:560px){.ptabs a{flex:1 1 0;padding:.55rem .6rem;font-size:.82rem}}

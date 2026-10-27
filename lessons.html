@@ -14,7 +14,7 @@
   <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
   <div class="tabs">
     <a href="index.html">Story</a>
-    <a href="results.html">Results</a>
+    <a href="local-frontier.html">Results</a>
     <a href="lessons.html" aria-current="page">Lessons</a>
     <a href="setup.html">Setup</a>
     <a href="pi.html">Running on Pi</a>
@@ -324,6 +324,30 @@ practical changes follow. Until it is explained, avoid sustained full load on bo
 <code>sudo nvidia-bug-report.sh</code> <em>before</em> power-cycling after the next one, because the driver&rsquo;s crash
 state lives in the loaded driver and a power-cycle discards it.</p>
 
+<div class="box">
+  <strong>The rerun with the logger on (25&ndash;26 October).</strong> After the power-cycle we reproduced the third
+  fault&rsquo;s conditions on purpose: GPU&nbsp;0 alone on a LiveCodeBench arm for 30 minutes, then GPU&nbsp;1 joining
+  with a second arm, both at full load for <strong>five hours</strong> (00:19&ndash;05:17), then GPU&nbsp;0 alone again until
+  08:26. <strong>No fault.</strong> What the 4&nbsp;Hz log shows for the five hours with both loaded:
+  <div class="tw">
+    <table>
+      <thead><tr><th></th><th>GPU&nbsp;0</th><th>GPU&nbsp;1</th></tr></thead>
+      <tbody>
+        <tr><td>Mean board power</td><td class="n">183&nbsp;W</td><td class="n">249&nbsp;W</td></tr>
+        <tr><td>Peak instantaneous power</td><td class="n">273&nbsp;W</td><td class="n">308&nbsp;W</td></tr>
+        <tr><td>Peak core temperature</td><td class="n">77&nbsp;&deg;C, fan at 100%</td><td class="n">70&nbsp;&deg;C</td></tr>
+        <tr><td>Hardware slowdown samples</td><td class="n">2 (at 03:25, thermal)</td><td class="n">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  GPU&nbsp;0 is the <em>hotter</em> card, not the hungrier one. It drew a quarter less than GPU&nbsp;1 with its fan
+  pinned, and it is the only card that raised the hardware thermal-slowdown flag, at a core reading of 76&nbsp;&deg;C.
+  That is consistent with its GDDR6X memory running hot, which the 3090 does not report. A clean five hours does not
+  explain three faults. But with power delivery behaving and a 1500&nbsp;W supply, <strong>heat on GPU&nbsp;0 is now the
+  leading suspect</strong>: its airflow, whether it sits in GPU&nbsp;1&rsquo;s exhaust, its memory pads. That is a hypothesis,
+  not a finding.
+</div>
+
 <h3>The topology is the more useful finding</h3>
 
 <div class="tw">
@@ -383,7 +407,7 @@ own checkpoint ships, and now creates it when absent.</p>
 
 <h2 id="swift">A benchmark that looped for ten hours, and a score that flattered the winner</h2>
 
-<p>Testing the <a href="results.html#swift">Swift fine-tune</a> against the base model with thinking on produced two
+<p>Testing the <a href="local-frontier.html#swift">Swift fine-tune</a> against the base model with thinking on produced two
 traps worth writing down, one in the harness and one in the result.</p>
 
 <p><strong>The harness.</strong> Aider&rsquo;s benchmark does not stream, and its request timeout is a module constant:
@@ -429,7 +453,7 @@ truncations next to every pass rate.</p>
 </div>
 
 <div class="foot">
-  <p>The framework, its specification and the fairness contract live alongside the deployment configs. See <a href="setup.html">Setup</a> to reproduce the stack, <a href="results.html">Results</a> for the measurements, and the <a href="log.html">Log</a> for the primary record including every correction.</p>
+  <p>The framework, its specification and the fairness contract live alongside the deployment configs. See <a href="setup.html">Setup</a> to reproduce the stack, <a href="local-frontier.html">Results</a> for the measurements, and the <a href="log.html">Log</a> for the primary record including every correction.</p>
 </div>
 
 </main>

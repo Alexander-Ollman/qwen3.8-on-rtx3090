@@ -14,7 +14,7 @@
   <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
   <div class="tabs">
     <a href="index.html" aria-current="page">Story</a>
-    <a href="results.html">Results</a>
+    <a href="local-frontier.html">Results</a>
     <a href="lessons.html">Lessons</a>
     <a href="setup.html">Setup</a>
     <a href="pi.html">Running on Pi</a>
@@ -31,13 +31,34 @@
 </header>
 
 
+<section id="flash" class="section">
+<p class="kicker">Update &#183; 26 October 2026</p>
+<h2 style="margin-top:.2rem">A 177B model on two gaming cards, at 130 tokens a second</h2>
+
+<p class="lede"><strong>Qwen3.8-Flash-Next</strong>, a 177B mixture-of-experts, runs on both 3090s through the
+Strata engine at <strong>about 130&nbsp;tok/s</strong> on a short prompt and 96&nbsp;tok/s at 239K tokens deep, and it
+reads a 239K-token prompt in 3.2 minutes. On LiveCodeBench v6 it scores <strong>80.8% over 120 problems</strong>,
+about 19 points above the base 27B (62%) under the same 32K-token answer cap. The lead is all on problems the
+27B runs out of room for: on problems both finished, they score the same. Against Swift-27B, its edge is 6.6 points
+on one set of 60, too few problems to call. It needs the whole machine: both cards and about 48&nbsp;GB of host RAM. It is now the
+<code>flash-strata</code> profile in the control panel. When both cards are free, it is what we run.</p>
+
+<div class="box">
+  <strong>What was measured.</strong> ISTA-DASLab&rsquo;s GSQ-RCO IQ3_S GGUF (routed experts at ~3.3 bits per weight).
+  Three engines: llama.cpp on one card (25&nbsp;tok/s), llama.cpp on two (47), Strata on two (116&ndash;138, with its
+  own draft layer). The same LiveCodeBench harness and settings as every 27B arm, on two sets of 60 problems.
+  <a href="local-frontier.html#flash">Full method and numbers&nbsp;&rarr;</a>
+</div>
+</section>
+
 <section id="long" class="section">
 <p class="kicker">Update &#183; 24 October 2026</p>
 <h2 style="margin-top:.2rem">The whole 262K window on one card, and an &ldquo;uncensored&rdquo; build that is the same model</h2>
 
 <p class="lede">Through llama.cpp, <strong>Unsloth&rsquo;s UD-Q4_K_M with a q4_0 KV cache holds the model&rsquo;s full
 262,144-token window on a single 3090</strong>, at 22.4&nbsp;GiB. It is slow at that depth &mdash; a 261K-token prompt
-takes 9.6 minutes to read, then decodes at 19&nbsp;tok/s &mdash; and q4_0 KV quality at depth is not measured yet, so
+takes 9.6 minutes to read, then decodes at 19&nbsp;tok/s. A recall test at depth found nothing lost to q4_0 KV, but
+finer fidelity is unmeasured, so
 <strong>fp8 KV at 150K on patched vLLM stays the recommendation for anything that fits in 150K</strong>. And
 <a href="https://huggingface.co/outsourc-e/Qwen3.8-27B-Unleashed-GGUF">Unleashed-27B</a>, for all its benchmark
 reputation, is the base model with refusals
@@ -48,7 +69,7 @@ speed or room, and the only reason to run it is refusals.</p>
   <strong>What was measured.</strong> One card, llama.cpp b10902, MTP speculation. Stock Unsloth UD-Q4_K_M:
   LiveCodeBench v6 63.3%, the same as the base model&rsquo;s earlier run; KL divergence 0.063 against its Q8_0.
   Unleashed Q4_K_M: KL divergence 0.071 against its own Q8_0, and 0.032 between the two Q8_0s &mdash; the uncensoring
-  alone. Its LiveCodeBench rerun is still running. <a href="results.html#unleashed">Full method and numbers&nbsp;&rarr;</a>
+  alone. LiveCodeBench over 120 problems: Unleashed 62.5%, stock 61.7%, the same within noise. <a href="local-frontier.html#unleashed">Full method and numbers&nbsp;&rarr;</a>
 </div>
 </section>
 
@@ -121,7 +142,7 @@ speed or room, and the only reason to run it is refusals.</p>
   box both now sit behind one endpoint and the request&rsquo;s <code>model</code> field picks the card.
   Nobody has published a 4-bit vLLM checkpoint of Swift; when one exists the two wins stack, and that combination is
   unmeasured. Sample sizes are 60 and 36 with one seed, so treat the pass rates as &plusmn;12 points and the token
-  reductions as solid. <a href="results.html#swift">Full method and numbers&nbsp;&rarr;</a>
+  reductions as solid. <a href="local-frontier.html#swift">Full method and numbers&nbsp;&rarr;</a>
 </div>
 </section>
 
@@ -186,7 +207,7 @@ speed or room, and the only reason to run it is refusals.</p>
 </div>
 
 <div class="box">
-  <strong>If you do need the context, fp8 is the one to use &mdash; and we had to build a new instrument to say so.</strong> We originally reported that both quantized caches &ldquo;changed what the model says&rdquo;, on the evidence of how quickly their output diverged from bf16. That measurement compounds one rounding difference into two different paragraphs and tells you almost nothing. Measured properly &mdash; per-token likelihoods over 200,000-token documents the model has never seen &mdash; <strong>fp8 is indistinguishable from bf16 all the way to 150K</strong>, and scores 100% on retrieval, verbatim-copy and multi-hop probes at 147K. The 4-bit cache that reaches 200K does cost something real, and a smaller 3-bit checkpoint on a different engine costs more. The <a href="results.html#longctx">Results</a> tab has the numbers.
+  <strong>If you do need the context, fp8 is the one to use &mdash; and we had to build a new instrument to say so.</strong> We originally reported that both quantized caches &ldquo;changed what the model says&rdquo;, on the evidence of how quickly their output diverged from bf16. That measurement compounds one rounding difference into two different paragraphs and tells you almost nothing. Measured properly &mdash; per-token likelihoods over 200,000-token documents the model has never seen &mdash; <strong>fp8 is indistinguishable from bf16 all the way to 150K</strong>, and scores 100% on retrieval, verbatim-copy and multi-hop probes at 147K. The 4-bit cache that reaches 200K does cost something real, and a smaller 3-bit checkpoint on a different engine costs more. The <a href="local-frontier.html#longctx">Results</a> tab has the numbers.
 </div>
 
 <h2>How we got from 27 to 212</h2>
@@ -249,7 +270,7 @@ speed or room, and the only reason to run it is refusals.</p>
 
 <p>We ran the identical drafter under two engines and got 60.7 tok/s in one and 212.1 in the other. If you are chasing speed, the engine deserves more of your attention than the drafter does.</p>
 
-<p>One caveat we only nailed down at the end: <strong>the drafter that wins for one person loses for a team.</strong> DFlash2 is the fastest thing here at C=1, but run it on both cards and serve eight or sixteen people and it falls 12&ndash;34% behind plain MTP &mdash; it drafts seven tokens a step, accepts under half of them, and that wasted checking is exactly what a busy GPU cannot afford. Fast for you, slower for everyone. The <a href="results.html">Results</a> tab has the full comparison.</p>
+<p>One caveat we only nailed down at the end: <strong>the drafter that wins for one person loses for a team.</strong> DFlash2 is the fastest thing here at C=1, but run it on both cards and serve eight or sixteen people and it falls 12&ndash;34% behind plain MTP &mdash; it drafts seven tokens a step, accepts under half of them, and that wasted checking is exactly what a busy GPU cannot afford. Fast for you, slower for everyone. The <a href="local-frontier.html">Results</a> tab has the full comparison.</p>
 
 <h3>And one thing to do before any of it</h3>
 
@@ -283,7 +304,7 @@ sudo nvidia-smi -pm 1      # persistence mode</code></pre>
 <p>Five days of measurement went into that chart, and a fair amount of it was us being wrong in interesting ways — a benchmark that scored a model whose output it could not read, a day of results invalidated by two GPUs quietly interfering with each other, a correction we published that turned out to be a worse error than the thing it corrected.</p>
 
 <ul>
-  <li><a href="results.html"><strong>Results</strong></a> — every number and graph, with provenance attached to each</li>
+  <li><a href="local-frontier.html"><strong>Results</strong></a> — every number and graph, with provenance attached to each</li>
   <li><a href="lessons.html"><strong>Lessons</strong></a> — the six ways this machine reported wrong numbers, and how to not repeat them</li>
   <li><a href="setup.html"><strong>Setup</strong></a> — the commands, rung by rung</li>
   <li><a href="pi.html"><strong>Running on Pi</strong></a> — a coding agent on the other end of the wire, and what it built</li>

@@ -14,7 +14,7 @@
   <a class="brand" href="index.html">Qwen3.8-27B <span>· RTX 3090</span></a>
   <div class="tabs">
     <a href="index.html">Story</a>
-    <a href="results.html">Results</a>
+    <a href="local-frontier.html">Results</a>
     <a href="lessons.html">Lessons</a>
     <a href="setup.html">Setup</a>
     <a href="pi.html">Running on Pi</a>
@@ -2600,7 +2600,7 @@ time), Aider Swift (2.8&nbsp;h), LiveCodeBench with the author&rsquo;s own quant
   truncated), 43% less time on agentic work even at llama.cpp speed. Both models now sit behind one endpoint
   with an njs router picking the card from the request&rsquo;s <code>model</code> field. The base model on patched
   vLLM stays the answer for thinking-off and latency-bound work. Numbers and caveats:
-  <a href="results.html#swift">Results</a>.
+  <a href="local-frontier.html#swift">Results</a>.
 </div>
 
 <p class="section-note"><strong>Router bug found on the way.</strong> The first njs router used
@@ -2640,7 +2640,7 @@ GPU&nbsp;1 and still running at the time of writing.</p>
   one-card route to the full window found so far (22.4&nbsp;GiB, 9.6&nbsp;min to read 261K, 19&nbsp;tok/s at that
   depth), but q4_0 KV quality at depth is unmeasured. Unleashed is the base model with refusals removed: KLD 0.032
   between the two Q8_0s, against 0.063 for 4-bit quantization; no speed or fit advantage. It is served only as a
-  hidden profile. Numbers: <a href="results.html#unleashed">Results</a>.
+  hidden profile. Numbers: <a href="local-frontier.html#unleashed">Results</a>.
 </div>
 
 <p class="section-note"><strong>Serving changes.</strong> New control-panel profiles <code>long-gguf</code> (stock
@@ -2654,8 +2654,56 @@ the container on the old inode; restart it to pick up the change. <a href="setup
 long-context harness of &sect;27&ndash;28; the Unleashed LiveCodeBench number; and Qwen3.8-Flash-Next, whose
 ISTA-DASLab IQ3_S (83.6&nbsp;GB) is downloading. Flash-Next is planned across both cards and waits on GPU&nbsp;0 and a lower power
 cap for two-card runs. The model card&rsquo;s and a third party&rsquo;s figures for it are quoted, labelled, in
-<a href="results.html#unleashed">Results</a>; none are ours yet.</p>
+<a href="local-frontier.html#unleashed">Results</a>; none are ours yet. (Measured since: &sect;31.)</p>
 
+
+<h2 id="flashnext">31. Flash-Next on Both Cards, and the Second Look at GPU&nbsp;0 <span class="badge">24&ndash;26 OCT</span></h2>
+
+<p><strong>The Unleashed rerun finished</strong>: 63.3% on set 1, the same as stock, so the 24 Oct table&rsquo;s open cell
+closes as a tie. A second set of 60 problems (seed 1) put stock at 60.0% and Unleashed at 61.7%. Load tests of the other
+Unleashed files: Q3_K_XL holds 262,144 even at q8_0 KV; IQ4_XS 229,376 at q8_0 and 262,144 at q4_0; Q5_K_M 114,688 and
+196,608.</p>
+
+<p><strong>GPU&nbsp;0 power test.</strong> After the power-cycle, the third fault&rsquo;s conditions were reproduced
+with the 4&nbsp;Hz logger running: five hours with both cards at full load, no fault. GPU&nbsp;0 ran hotter on less
+power (mean 183&nbsp;W against 249, 77&nbsp;&deg;C at 100% fan) and was the only card to flag a hardware thermal slowdown.
+Heat is now the leading suspect, unproven (<a href="lessons.html#xid">Lessons</a>).</p>
+
+<p><strong>KV recall at depth.</strong> Eight planted access codes at spread-out depths, three trials per depth, stock
+UD-Q4_K_M: 100% recall in every trial, for q8_0 KV at 64K/128K/190K and for q4_0 at those depths and 258K. No gross
+loss from q4_0. The test hit its ceiling, so it cannot rank the two.</p>
+
+<p><strong>Flash-Next.</strong> ISTA-DASLab&rsquo;s GSQ-RCO IQ3_S of the 177B MoE: routed experts 50.3&nbsp;GB at 3.33
+bits per weight, the rest 4.5&nbsp;GB at 7.3, and a 28.8&nbsp;GB n-gram table at 4.5. The file has no MTP head.</p>
+<ul>
+  <li>llama.cpp b10902, one card, experts of 32 layers in RAM: 22&nbsp;tok/s decode, ~72&nbsp;tok/s prompt reading.
+  The newer b11854 build: 25 and ~78.</li>
+  <li>llama.cpp b11854, two cards: <code>-ncmoe</code> cannot place this split, because it moves only the first N
+  layers&rsquo; experts, and those are all on GPU&nbsp;0. <code>--fit</code> placed it: 47&nbsp;tok/s decode, ~520 prompt
+  reading.</li>
+  <li><strong>Strata 0.2.3, two cards</strong>, int8 KV, its own 5.2&nbsp;GB draft layer: 116&ndash;138&nbsp;tok/s decode.
+  On the first sweep, prompt reading appeared to climb with depth, to 4,600&nbsp;tok/s. That was prefix caching across
+  the sweep&rsquo;s nested prompts. A cold 239K prompt reads at 1,254&nbsp;tok/s (3.2 min) and then decodes at
+  96&nbsp;tok/s. CONTEXT=256k loads. The container holds about 48&nbsp;GB of host RAM.</li>
+  <li>LiveCodeBench v6, same harness and settings, both sets: <strong>83.3% and 78.3%, 80.8% over 120</strong>. Hard
+  problems 67% and 65%, against 27&ndash;33% for the base 27B. One answer hit the 32,768-token cap, against 18&ndash;21
+  per set for the 27B. Against Swift-27B on set 1 (76.7%), the lead is 6.6 points, inside one set&rsquo;s noise.
+  On problems where neither model hit the cap the scores are identical: 38/38, 36/36 and 37/37 against the base and
+  Unleashed arms, and 44 against 46 for Swift. The whole lead is the cap artefact of &sect;29. Flash-Next finishes where
+  the 27B is cut off.</li>
+</ul>
+
+<div class="box">
+  <strong>Decision: when both cards are free, serve Flash-Next through Strata.</strong> It is the
+  <code>flash-strata</code> profile in qwen-control. Keep <code>long-gguf</code> for a single card, and the 27B
+  vLLM profiles for when one card is busy or the host&rsquo;s RAM is needed elsewhere. Numbers:
+  <a href="local-frontier.html#flash">Local frontier, Flash-Next tab</a>.
+</div>
+
+<p class="section-note"><strong>Housekeeping.</strong> The Results page is now <code>local-frontier.html</code>, with
+one tab per model; <code>results.html</code> redirects there. While pulling a llama.cpp image mid-study, the
+<code>server-cuda</code> tag moved from b10902 to b11854. It was re-pointed, so every 27B figure stays on
+b10902. Flash-Next llama.cpp figures name their build.</p>
 
 <div class="foot">
     <p><sup class="fn">1</sup> TP=2 + MTP k=3 hit 264 tok/s on code generation (high draft acceptance) in tfriedel&rsquo;s lab; narrative was ~179 tok/s. Numbers are from Qwen3.6-27B (same architecture).</p>
@@ -2663,7 +2711,7 @@ cap for two-card runs. The model card&rsquo;s and a third party&rsquo;s figures 
     <p><sup class="fn">3</sup> SGLang SMG cache-aware routing claims +92% throughput vs round-robin on prefix-heavy workloads; actual 3090 numbers are untested. Unique-prompt throughput should match vLLM within ~2&ndash;4%.</p>
     <p><sup class="fn">3.6</sup> Measured on Qwen3.6-27B. Same hybrid architecture (GDN+softmax), same parameter count. Directly comparable for throughput; Qwen3.8 is a training improvement, not an architecture change.</p>
     <p style="margin-top: 1rem;"><strong>Key sources:</strong> syv-ai/qwen38-27b-rtx3090, tfriedel/qwen3.6-rtx3090-lab, dbirks &amp; Pilcothink HF repos, lued/Qwen3.8-27B-INT8-W8A16-MTP, kingy.ai GGUF benchmarks, kgptalkie llama.cpp guide, AtomicChat/Unsloth GGUF repos, RadixArk/Qwen3.8-27B-DSpark, SGLang GitHub (sgl-project/sglang, PR #23331), Qwen official blog.</p>
-    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization), section 25 on 31 August (context raised to 85,000; sub-4-bit closed) and sections 26&ndash;28 on 1&ndash;3 September (group-size fix and ExLlamaV3, the fidelity harness, and the long-context fidelity results), section 29 in September (Swift against the base model) and section 30 on 24 October (Unleashed-27B and the full window on one card). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;30 are this host, at a 250 W power cap.</p>
+    <p style="margin-top: 0.5rem; font-style: italic;">Research compiled August 22, 2026; measured results added August 24 (section 10) and context-scaling curves August 25 (section 11, since corrected for measurement contention) and clean coding results (section 12) a multi-turn agentic profile (13), an independent cross-check (14) and first correctness results (15) and a blocked quantization comparison (16) serving-layer selection (17) and the framework&rsquo;s first report card (18) August 26, 2026. Sections 21&ndash;24 were added 29&ndash;31 August 2026 (context ceiling, tensor parallelism, GPU fault forensics, KV quantization), section 25 on 31 August (context raised to 85,000; sub-4-bit closed) and sections 26&ndash;28 on 1&ndash;3 September (group-size fix and ExLlamaV3, the fidelity harness, and the long-context fidelity results), section 29 in September (Swift against the base model) section 30 on 24 October (Unleashed-27B and the full window on one card) and section 31 on 26 October (Flash-Next on both cards). Sections 1&ndash;9 are community numbers and may vary with driver, build, and prompt shape; sections 10&ndash;31 are this host, at a 250 W power cap.</p>
   </div>
 
 
